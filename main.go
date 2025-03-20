@@ -86,12 +86,33 @@ func getJoinToken(ctx context.Context, controlPlaneIP string) (string, error) {
 }
 
 // generateCloudConfig for a particular node type
-func generateCloudConfig(nodeType string, controlPlaneIP string, joinToken string) string {
+func generateCloudConfig(nodeType string, initCluster bool, controlPlaneIP, joinToken string) string {
+	// initial: curl -sfL https://get.k3s.io | sh -s - server --cluster-init --tls-san <floatingIP>
+	// control plane nodes: curl -sfL https://get.k3s.io | sh -s - server --server https://${SERVER} --token '${TOKEN}'
+	// worker nodes: curl -sfL https://get.k3s.io | sh -s - agent --server https://${SERVER} --token '${TOKEN}'
+	var initFlag, tokenFlag, typeFlag, sanFlag, serverFlag string
+	switch nodeType {
+	case "server":
+		typeFlag = "server"
+		if initCluster {
+			initFlag = "--cluster-init"
+			sanFlag = fmt.Sprintf("--tls-san %s", controlPlaneIP)
+		} else {
+			serverFlag = fmt.Sprintf("--server https://%s:6443", controlPlaneIP)
+			tokenFlag = fmt.Sprintf("--token %s", joinToken)
+		}
+	case "agent":
+		typeFlag = "agent"
+		serverFlag = fmt.Sprintf("--server https://%s:6443", controlPlaneIP)
+		tokenFlag = fmt.Sprintf("--token %s", joinToken)
+	default:
+		log.Fatalf("Unknown node type: %s", nodeType)
+	}
 	return fmt.Sprintf(`
 #cloud-config
 runcmd:
-  - curl -sfL https://get.k3s.io | K3S_URL="https://%s:6443" K3S_TOKEN="%s" sh -s - %s
-`, controlPlaneIP, joinToken, nodeType)
+  - curl -sfL https://get.k3s.io | sh -s - %s %s %s %s
+`, typeFlag, initFlag, sanFlag, tokenFlag, serverFlag, sanFlag)
 }
 
 // ensureClusterExists checks if a k3s cluster exists, and creates one if needed
@@ -145,7 +166,7 @@ func ensureClusterExists(ctx context.Context, client *oxide.Client) error {
 	}
 
 	// find highest number control plane node
-	var highest int
+	var highest int = -1
 	for _, instance := range controlPlaneNodes {
 		count := strings.TrimPrefix(instance.Hostname, controlPlanePrefix)
 		if count == "" {
@@ -166,7 +187,12 @@ func ensureClusterExists(ctx context.Context, client *oxide.Client) error {
 	// the number we want is the next one
 	for i := 0; i < controlPlaneCount-len(controlPlaneNodes); i++ {
 		highest++
-		cloudConfig := generateCloudConfig("server", controlPlaneIP, joinToken)
+		// what if there were none?
+		var initCluster bool
+		if len(controlPlaneNodes) == 0 && i == 0 {
+			initCluster = true
+		}
+		cloudConfig := generateCloudConfig("server", initCluster, controlPlaneIP, joinToken)
 		if _, err := client.InstanceCreate(ctx, oxide.InstanceCreateParams{
 			Project: oxide.NameOrId(projectID),
 			Body: &oxide.InstanceCreate{
@@ -227,7 +253,7 @@ func handleAddNode(w http.ResponseWriter, r *http.Request) {
 	}
 
 	workerName := fmt.Sprintf("worker-%d", time.Now().Unix())
-	cloudConfig := generateCloudConfig("agent", controlPlaneIP, joinToken)
+	cloudConfig := generateCloudConfig("agent", false, controlPlaneIP, joinToken)
 	log.Printf("Creating worker node: %s", workerName)
 	_, err = client.InstanceCreate(ctx, oxide.InstanceCreateParams{
 		Project: oxide.NameOrId(clusterProject),
