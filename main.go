@@ -22,18 +22,20 @@ const (
 )
 
 var (
-	oxideAPIURL        string
-	tokenFilePath      string
-	k3sControlPlane    string
-	clusterProject     string
-	controlPlanePrefix string
-	controlPlaneCount  int
-	controlPlaneImage  string
-	workerImage        string
-	controlPlaneMemory uint64
-	workerMemory       uint64
-	controlPlaneCPU    uint16
-	workerCPU          uint16
+	oxideAPIURL             string
+	tokenFilePath           string
+	k3sControlPlane         string
+	clusterProject          string
+	controlPlanePrefix      string
+	controlPlaneCount       int
+	controlPlaneImageName   string
+	controlPlaneImageSource string
+	workerImageName         string
+	workerImageSource       string
+	controlPlaneMemory      uint64
+	workerMemory            uint64
+	controlPlaneCPU         uint16
+	workerCPU               uint16
 )
 
 // Node represents a Kubernetes node
@@ -115,11 +117,57 @@ runcmd:
 `, typeFlag, initFlag, sanFlag, tokenFlag, serverFlag, sanFlag)
 }
 
-// ensureClusterExists checks if a k3s cluster exists, and creates one if needed
-func ensureClusterExists(ctx context.Context, client *oxide.Client) error {
+// ensureImagesExist checks if the right images exist and creates them if needed
+// they can exist at the silo or project level. However, if they do not exist, then they
+// will be created at the project level.
+func ensureImagesExist(ctx context.Context, client *oxide.Client, projectID string, imageNames ...string) ([]string, error) {
+	images, err := client.ImageList(ctx, oxide.ImageListParams{Project: oxide.NameOrId(projectID)})
+	if err != nil {
+		return nil, fmt.Errorf("failed to list images: %w", err)
+	}
+	var (
+		missingImages []string
+		imageMap      = make(map[string]string)
+		idMap         = make(map[string]string)
+	)
+	for _, image := range images.Items {
+		imageMap[string(image.Name)] = image.Id
+	}
+	for _, imageName := range imageNames {
+		if _, ok := imageMap[imageName]; !ok {
+			missingImages = append(missingImages, imageName)
+		} else {
+			idMap[imageName] = imageMap[imageName]
+		}
+	}
+
+	for _, missingImage := range missingImages {
+		// how to create the image?
+		image, err := client.ImageCreate(ctx, oxide.ImageCreateParams{})
+		if err != nil {
+			return nil, fmt.Errorf("failed to create image: %w", err)
+		}
+		imageMap[missingImage] = image.Id
+		idMap[missingImage] = image.Id
+	}
+
+	// go through all of the image names and get their IDs
+	var ids []string
+	for _, imageName := range imageNames {
+		if id, ok := imageMap[imageName]; !ok {
+			return nil, fmt.Errorf("image '%s' does not exist", imageName)
+		} else {
+			ids = append(ids, id)
+		}
+	}
+	return ids, nil
+}
+
+// ensureProjectExists checks if the right project exists and returns its ID
+func ensureProjectExists(ctx context.Context, client *oxide.Client) (string, error) {
 	projects, err := client.ProjectList(ctx, oxide.ProjectListParams{})
 	if err != nil {
-		return fmt.Errorf("failed to list projects: %w", err)
+		return "", fmt.Errorf("failed to list projects: %w", err)
 	}
 
 	var projectID string
@@ -137,12 +185,16 @@ func ensureClusterExists(ctx context.Context, client *oxide.Client) error {
 			Body: &oxide.ProjectCreate{Name: oxide.Name(clusterProject)},
 		})
 		if err != nil {
-			return fmt.Errorf("failed to create project: %w", err)
+			return "", fmt.Errorf("failed to create project: %w", err)
 		}
 		projectID = newProject.Id
 		log.Printf("Created project '%s' with ID '%s'", clusterProject, projectID)
 	}
+	return projectID, nil
+}
 
+// ensureClusterExists checks if a k3s cluster exists, and creates one if needed
+func ensureClusterExists(ctx context.Context, client *oxide.Client, projectID string) error {
 	instances, err := client.InstanceList(ctx, oxide.InstanceListParams{Project: oxide.NameOrId(projectID)})
 	if err != nil {
 		return fmt.Errorf("failed to list instances: %w", err)
@@ -196,10 +248,15 @@ func ensureClusterExists(ctx context.Context, client *oxide.Client) error {
 		if _, err := client.InstanceCreate(ctx, oxide.InstanceCreateParams{
 			Project: oxide.NameOrId(projectID),
 			Body: &oxide.InstanceCreate{
-				Name:     oxide.Name(fmt.Sprintf("%s%d", controlPlanePrefix, highest)),
-				Memory:   oxide.ByteCount(controlPlaneMemory * GB),
-				Ncpus:    oxide.InstanceCpuCount(controlPlaneCPU),
-				Image:    controlPlaneImage,
+				Name:   oxide.Name(fmt.Sprintf("%s%d", controlPlanePrefix, highest)),
+				Memory: oxide.ByteCount(controlPlaneMemory * GB),
+				Ncpus:  oxide.InstanceCpuCount(controlPlaneCPU),
+				BootDisk: &oxide.InstanceDiskAttachment{
+					DiskSource: oxide.DiskSource{
+						Type:    oxide.DiskSourceTypeImage,
+						ImageId: controlPlaneImageName,
+					},
+				},
 				UserData: cloudConfig,
 			},
 		}); err != nil {
@@ -233,11 +290,6 @@ func handleAddNode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := ensureClusterExists(ctx, client); err != nil {
-		log.Printf("Cluster verification failed: %v", err)
-		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
-		return
-	}
 	projectID := clusterProject
 	controlPlaneIP, err := getControlPlaneIP(ctx, client, projectID)
 	if err != nil {
@@ -258,10 +310,15 @@ func handleAddNode(w http.ResponseWriter, r *http.Request) {
 	_, err = client.InstanceCreate(ctx, oxide.InstanceCreateParams{
 		Project: oxide.NameOrId(clusterProject),
 		Body: &oxide.InstanceCreate{
-			Name:     oxide.Name(workerName),
-			Memory:   oxide.ByteCount(workerMemory),
-			Ncpus:    oxide.InstanceCpuCount(workerCPU),
-			Image:    workerImage,
+			Name:   oxide.Name(workerName),
+			Memory: oxide.ByteCount(workerMemory),
+			Ncpus:  oxide.InstanceCpuCount(workerCPU),
+			BootDisk: &oxide.InstanceDiskAttachment{
+				DiskSource: oxide.DiskSource{
+					Type:    oxide.DiskSourceTypeImage,
+					ImageId: workerImageName,
+				},
+			},
 			UserData: cloudConfig,
 		},
 	})
@@ -275,19 +332,55 @@ func handleAddNode(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte("Worker node added"))
 }
 
+func initializeSetup() error {
+	ctx := context.Background()
+
+	token, err := loadOxideToken()
+	if err != nil {
+		return fmt.Errorf("Failed to load Oxide API token: %v", err)
+	}
+
+	cfg := oxide.Config{
+		Host:  oxideAPIURL,
+		Token: token,
+	}
+	client, err := oxide.NewClient(&cfg)
+	if err != nil {
+		return fmt.Errorf("Failed to create Oxide API client: %v", err)
+	}
+
+	projectID, err := ensureProjectExists(ctx, client)
+	if err != nil {
+		return fmt.Errorf("Project verification failed: %v", err)
+	}
+
+	if _, err := ensureImagesExist(ctx, client, projectID, controlPlaneImageName, workerImageName); err != nil {
+		return fmt.Errorf("Image verification failed: %v", err)
+	}
+
+	if err := ensureClusterExists(ctx, client, projectID); err != nil {
+		return fmt.Errorf("Cluster verification failed: %v", err)
+	}
+
+	return nil
+}
+
 func main() {
 	var rootCmd = &cobra.Command{
 		Use:   "node-manager",
 		Short: "Node Management Service",
-		Run: func(cmd *cobra.Command, args []string) {
+		RunE: func(cmd *cobra.Command, args []string) error {
 			log.Println("Starting Node Management Service...")
+			if err := initializeSetup(); err != nil {
+				return fmt.Errorf("Failed to initialize setup: %v", err)
+			}
 
 			// Define API routes
 			http.HandleFunc("/nodes/add", handleAddNode)
 
 			// Start HTTP server
 			log.Println("API listening on port 8080")
-			http.ListenAndServe(":8080", nil)
+			return http.ListenAndServe(":8080", nil)
 		},
 	}
 
@@ -297,8 +390,10 @@ func main() {
 	rootCmd.Flags().StringVar(&clusterProject, "cluster-project", "ainekko-cluster", "Oxide project name for Kubernetes cluster")
 	rootCmd.Flags().StringVar(&controlPlanePrefix, "control-plane-prefix", "ainekko-control-plane-", "Prefix for control plane instances")
 	rootCmd.Flags().IntVar(&controlPlaneCount, "control-plane-count", 3, "Number of control plane instances to maintain")
-	rootCmd.Flags().StringVar(&controlPlaneImage, "control-plane-image", "ainekko-image", "Image to use for control plane instances")
-	rootCmd.Flags().StringVar(&workerImage, "worker-image", "ainekko-image", "Image to use for worker nodes")
+	rootCmd.Flags().StringVar(&controlPlaneImageName, "control-plane-image-name", "debian:12-cloud", "Image to use for control plane instances")
+	rootCmd.Flags().StringVar(&controlPlaneImageSource, "control-plane-image-source", "https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-genericcloud-amd64.raw", "Image to use for control plane instances")
+	rootCmd.Flags().StringVar(&workerImageName, "worker-image", "debian:12-cloud", "Image to use for worker nodes")
+	rootCmd.Flags().StringVar(&workerImageSource, "worker-image-source", "https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-genericcloud-amd64.raw", "Image to use for worker instances")
 	rootCmd.Flags().Uint64Var(&controlPlaneMemory, "control-plane-memory", 4, "Memory to allocate to each control plane node, in GB")
 	rootCmd.Flags().Uint64Var(&workerMemory, "worker-memory", 16, "Memory to allocate to each worker node, in GB")
 	rootCmd.Flags().Uint16Var(&controlPlaneCPU, "control-plane-cpu", 2, "vCPU count to allocate to each control plane node")
