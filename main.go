@@ -24,7 +24,6 @@ const (
 var (
 	oxideAPIURL             string
 	tokenFilePath           string
-	k3sControlPlane         string
 	clusterProject          string
 	controlPlanePrefix      string
 	controlPlaneCount       int
@@ -113,7 +112,7 @@ func generateCloudConfig(nodeType string, initCluster bool, controlPlaneIP, join
 	return fmt.Sprintf(`
 #cloud-config
 runcmd:
-  - curl -sfL https://get.k3s.io | sh -s - %s %s %s %s
+  - curl -sfL https://get.k3s.io | sh -s - %s %s %s %s %s %s
 `, typeFlag, initFlag, sanFlag, tokenFlag, serverFlag, sanFlag)
 }
 
@@ -234,7 +233,7 @@ func ensureClusterExists(ctx context.Context, client *oxide.Client, projectID st
 	}
 	joinToken, err := getJoinToken(ctx, controlPlaneIP)
 	if err != nil {
-		return fmt.Errorf("Failed to retrieve join token: %v", err)
+		return fmt.Errorf("failed to retrieve join token: %v", err)
 	}
 	// the number we want is the next one
 	for i := 0; i < controlPlaneCount-len(controlPlaneNodes); i++ {
@@ -337,7 +336,7 @@ func initializeSetup() error {
 
 	token, err := loadOxideToken()
 	if err != nil {
-		return fmt.Errorf("Failed to load Oxide API token: %v", err)
+		return fmt.Errorf("failed to load Oxide API token: %v", err)
 	}
 
 	cfg := oxide.Config{
@@ -346,20 +345,20 @@ func initializeSetup() error {
 	}
 	client, err := oxide.NewClient(&cfg)
 	if err != nil {
-		return fmt.Errorf("Failed to create Oxide API client: %v", err)
+		return fmt.Errorf("failed to create Oxide API client: %v", err)
 	}
 
 	projectID, err := ensureProjectExists(ctx, client)
 	if err != nil {
-		return fmt.Errorf("Project verification failed: %v", err)
+		return fmt.Errorf("project verification failed: %v", err)
 	}
 
 	if _, err := ensureImagesExist(ctx, client, projectID, controlPlaneImageName, workerImageName); err != nil {
-		return fmt.Errorf("Image verification failed: %v", err)
+		return fmt.Errorf("image verification failed: %v", err)
 	}
 
 	if err := ensureClusterExists(ctx, client, projectID); err != nil {
-		return fmt.Errorf("Cluster verification failed: %v", err)
+		return fmt.Errorf("cluster verification failed: %v", err)
 	}
 
 	return nil
@@ -372,7 +371,7 @@ func main() {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			log.Println("Starting Node Management Service...")
 			if err := initializeSetup(); err != nil {
-				return fmt.Errorf("Failed to initialize setup: %v", err)
+				return fmt.Errorf("failed to initialize setup: %v", err)
 			}
 
 			// Define API routes
