@@ -206,7 +206,7 @@ func ensureImagesExist(ctx context.Context, client *oxide.Client, projectID stri
 		}); err != nil {
 			return nil, fmt.Errorf("failed to start bulk write import: %w", err)
 		}
-		// write in 1MB chunks or until finished
+		// write in 0.5MB chunks or until finished
 		f, err := os.Open(file.Name())
 		if err != nil {
 			return nil, fmt.Errorf("failed to open file: %w", err)
@@ -214,7 +214,7 @@ func ensureImagesExist(ctx context.Context, client *oxide.Client, projectID stri
 		defer f.Close()
 		var offset int
 		for {
-			buf := make([]byte, MB)
+			buf := make([]byte, MB/2)
 			n, err := f.Read(buf)
 			if err != nil {
 				return nil, fmt.Errorf("failed to read file: %w", err)
