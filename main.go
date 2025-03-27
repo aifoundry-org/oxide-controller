@@ -189,7 +189,10 @@ func ensureImagesExist(ctx context.Context, client *oxide.Client, projectID stri
 				Description: fmt.Sprintf("Disk for image '%s'", missingImage.Name),
 				Size:        oxide.ByteCount(size),
 				Name:        oxide.Name(missingImage.Name),
-				DiskSource:  oxide.DiskSource{Type: oxide.DiskSourceTypeBlank},
+				DiskSource: oxide.DiskSource{
+					Type:      oxide.DiskSourceTypeImportingBlocks,
+					BlockSize: blockSize, // TODO: Must be multiple of image size. Verify?
+				},
 			},
 		})
 		if err != nil {
@@ -395,8 +398,9 @@ func ensureClusterExists(ctx context.Context, client *oxide.Client, projectID st
 				Ncpus:  oxide.InstanceCpuCount(controlPlaneCPU),
 				BootDisk: &oxide.InstanceDiskAttachment{
 					DiskSource: oxide.DiskSource{
-						Type:    oxide.DiskSourceTypeImage,
-						ImageId: controlPlaneImageName,
+						Type:      oxide.DiskSourceTypeImage,
+						ImageId:   controlPlaneImageName,
+						BlockSize: blockSize, // TODO: Must be multiple of image size. Verify?
 					},
 				},
 				UserData: cloudConfig,
@@ -457,8 +461,9 @@ func handleAddNode(w http.ResponseWriter, r *http.Request) {
 			Ncpus:  oxide.InstanceCpuCount(workerCPU),
 			BootDisk: &oxide.InstanceDiskAttachment{
 				DiskSource: oxide.DiskSource{
-					Type:    oxide.DiskSourceTypeImage,
-					ImageId: workerImageName,
+					Type:      oxide.DiskSourceTypeImage,
+					ImageId:   workerImageName,
+					BlockSize: blockSize, // TODO: Must be multiple of image size. Verify?
 				},
 			},
 			UserData: cloudConfig,
