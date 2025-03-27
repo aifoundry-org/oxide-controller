@@ -59,7 +59,7 @@ func loadOxideToken() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return string(data), nil
+	return strings.TrimSpace(string(data)), nil
 }
 
 func getControlPlaneIP(ctx context.Context, client *oxide.Client, projectID string) (string, error) {
