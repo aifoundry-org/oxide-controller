@@ -180,6 +180,8 @@ func ensureImagesExist(ctx context.Context, client *oxide.Client, projectID stri
 		if size == 0 {
 			return nil, fmt.Errorf("image file is empty")
 		}
+		// FIXME?: round to the nearest GB: not verified - the default debian image is *exactly* 3GB :)
+		//   https://github.com/oxidecomputer/oxide.rs/blob/17e3f58248832f977d366afdc69641551a62b1db/sdk/src/extras/disk.rs#L735
 		// round up to nearest block size
 		size = (size + blockSize) &^ blockSize
 		// create the disk
