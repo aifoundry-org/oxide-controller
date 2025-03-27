@@ -128,7 +128,8 @@ runcmd:
 // they can exist at the silo or project level. However, if they do not exist, then they
 // will be created at the project level.
 func ensureImagesExist(ctx context.Context, client *oxide.Client, projectID string, images ...Image) ([]string, error) {
-	existing, err := client.ImageList(ctx, oxide.ImageListParams{Project: oxide.NameOrId(projectID)})
+	// TODO: Do we need pagination? Using arbitrary limit for now.
+	existing, err := client.ImageList(ctx, oxide.ImageListParams{Project: oxide.NameOrId(projectID), Limit: 32})
 	if err != nil {
 		return nil, fmt.Errorf("failed to list images: %w", err)
 	}
@@ -305,7 +306,8 @@ func downloadFile(filepath, url string) error {
 
 // ensureProjectExists checks if the right project exists and returns its ID
 func ensureProjectExists(ctx context.Context, client *oxide.Client) (string, error) {
-	projects, err := client.ProjectList(ctx, oxide.ProjectListParams{})
+	// TODO: do we need pagination? Using arbitrary limit for now.
+	projects, err := client.ProjectList(ctx, oxide.ProjectListParams{Limit: 32})
 	if err != nil {
 		return "", fmt.Errorf("failed to list projects: %w", err)
 	}
