@@ -64,7 +64,11 @@ func loadOxideToken() (string, error) {
 
 func getControlPlaneIP(ctx context.Context, client *oxide.Client, projectID string) (string, error) {
 	var controlPlaneIP string
-	fips, err := client.FloatingIpList(ctx, oxide.FloatingIpListParams{Project: oxide.NameOrId(projectID)})
+	// TODO: Do we need pagination? Using arbitrary limit for now.
+	fips, err := client.FloatingIpList(ctx, oxide.FloatingIpListParams{
+		Project: oxide.NameOrId(projectID),
+		Limit:   32,
+	})
 	if err != nil {
 		return "", fmt.Errorf("failed to list floating IPs: %w", err)
 	}
@@ -350,7 +354,11 @@ func ensureProjectExists(ctx context.Context, client *oxide.Client) (string, err
 
 // ensureClusterExists checks if a k3s cluster exists, and creates one if needed
 func ensureClusterExists(ctx context.Context, client *oxide.Client, projectID string) error {
-	instances, err := client.InstanceList(ctx, oxide.InstanceListParams{Project: oxide.NameOrId(projectID)})
+	// TODO: endpoint is paginated, using arbitrary limit for now.
+	instances, err := client.InstanceList(ctx, oxide.InstanceListParams{
+		Project: oxide.NameOrId(projectID),
+		Limit:   32,
+	})
 	if err != nil {
 		return fmt.Errorf("failed to list instances: %w", err)
 	}
