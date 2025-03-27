@@ -200,8 +200,7 @@ func ensureImagesExist(ctx context.Context, client *oxide.Client, projectID stri
 		}
 		// import the data
 		if err := client.DiskBulkWriteImportStart(ctx, oxide.DiskBulkWriteImportStartParams{
-			Project: oxide.NameOrId(projectID),
-			Disk:    oxide.NameOrId(disk.Id),
+			Disk: oxide.NameOrId(disk.Id),
 		}); err != nil {
 			return nil, fmt.Errorf("failed to start bulk write import: %w", err)
 		}
@@ -223,8 +222,7 @@ func ensureImagesExist(ctx context.Context, client *oxide.Client, projectID stri
 			}
 			// convert the read data into base64. Why? because that is what oxide wants
 			if err := client.DiskBulkWriteImport(ctx, oxide.DiskBulkWriteImportParams{
-				Project: oxide.NameOrId(projectID),
-				Disk:    oxide.NameOrId(disk.Id),
+				Disk: oxide.NameOrId(disk.Id),
 				Body: &oxide.ImportBlocksBulkWrite{
 					Base64EncodedData: base64.StdEncoding.EncodeToString(buf[:n]),
 					Offset:            offset,
@@ -235,15 +233,13 @@ func ensureImagesExist(ctx context.Context, client *oxide.Client, projectID stri
 			offset += n
 		}
 		if err := client.DiskBulkWriteImportStop(ctx, oxide.DiskBulkWriteImportStopParams{
-			Project: oxide.NameOrId(projectID),
-			Disk:    oxide.NameOrId(disk.Id),
+			Disk: oxide.NameOrId(disk.Id),
 		}); err != nil {
 			return nil, fmt.Errorf("failed to stop bulk write import: %w", err)
 		}
 		// finalize the import
 		if err := client.DiskFinalizeImport(ctx, oxide.DiskFinalizeImportParams{
-			Disk:    oxide.NameOrId(disk.Id),
-			Project: oxide.NameOrId(projectID),
+			Disk: oxide.NameOrId(disk.Id),
 			Body: &oxide.FinalizeDisk{
 				SnapshotName: oxide.Name(snapshotName),
 			},
@@ -252,8 +248,7 @@ func ensureImagesExist(ctx context.Context, client *oxide.Client, projectID stri
 		}
 
 		client.DiskDelete(ctx, oxide.DiskDeleteParams{
-			Project: oxide.NameOrId(projectID),
-			Disk:    oxide.NameOrId(disk.Id),
+			Disk: oxide.NameOrId(disk.Id),
 		})
 
 		image, err := client.ImageCreate(ctx, oxide.ImageCreateParams{
