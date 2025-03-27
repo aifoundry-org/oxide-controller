@@ -256,6 +256,14 @@ func ensureImagesExist(ctx context.Context, client *oxide.Client, projectID stri
 			Disk: oxide.NameOrId(disk.Id),
 		})
 
+		// Find snapshot Id by name.
+		snapshot, err := client.SnapshotView(ctx, oxide.SnapshotViewParams{
+			Snapshot: oxide.NameOrId(snapshotName), Project: oxide.NameOrId(projectID),
+		})
+		if err != nil {
+			return nil, fmt.Errorf("failed to find snapshot: %w", err)
+		}
+
 		image, err := client.ImageCreate(ctx, oxide.ImageCreateParams{
 			Project: oxide.NameOrId(projectID),
 			Body: &oxide.ImageCreate{
@@ -263,7 +271,7 @@ func ensureImagesExist(ctx context.Context, client *oxide.Client, projectID stri
 				Description: fmt.Sprintf("Image for '%s'", missingImage.Name),
 				Source: oxide.ImageSource{
 					Type: oxide.ImageSourceTypeSnapshot,
-					Id:   snapshotName,
+					Id:   snapshot.Id,
 				},
 			},
 		})
