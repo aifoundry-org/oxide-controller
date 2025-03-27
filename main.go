@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -216,7 +217,7 @@ func ensureImagesExist(ctx context.Context, client *oxide.Client, projectID stri
 		for {
 			buf := make([]byte, MB/2)
 			n, err := f.Read(buf)
-			if err != nil {
+			if err != nil && err != io.EOF {
 				return nil, fmt.Errorf("failed to read file: %w", err)
 			}
 			if n == 0 {
