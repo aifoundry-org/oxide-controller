@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -58,12 +59,16 @@ func loadOxideToken() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return string(data), nil
+	return strings.TrimSpace(string(data)), nil
 }
 
 func getControlPlaneIP(ctx context.Context, client *oxide.Client, projectID string) (string, error) {
 	var controlPlaneIP string
-	fips, err := client.FloatingIpList(ctx, oxide.FloatingIpListParams{Project: oxide.NameOrId(projectID)})
+	// TODO: Do we need pagination? Using arbitrary limit for now.
+	fips, err := client.FloatingIpList(ctx, oxide.FloatingIpListParams{
+		Project: oxide.NameOrId(projectID),
+		Limit:   32,
+	})
 	if err != nil {
 		return "", fmt.Errorf("failed to list floating IPs: %w", err)
 	}
@@ -128,7 +133,10 @@ runcmd:
 // they can exist at the silo or project level. However, if they do not exist, then they
 // will be created at the project level.
 func ensureImagesExist(ctx context.Context, client *oxide.Client, projectID string, images ...Image) ([]string, error) {
-	existing, err := client.ImageList(ctx, oxide.ImageListParams{Project: oxide.NameOrId(projectID)})
+	// TODO: We don't need to list images, we can `View` them by name -
+	//       `images` array is never long, few more requests shouldn't harm.
+	// TODO: Do we need pagination? Using arbitrary limit for now.
+	existing, err := client.ImageList(ctx, oxide.ImageListParams{Project: oxide.NameOrId(projectID), Limit: 32})
 	if err != nil {
 		return nil, fmt.Errorf("failed to list images: %w", err)
 	}
@@ -179,6 +187,8 @@ func ensureImagesExist(ctx context.Context, client *oxide.Client, projectID stri
 		if size == 0 {
 			return nil, fmt.Errorf("image file is empty")
 		}
+		// FIXME?: round to the nearest GB: not verified - the default debian image is *exactly* 3GB :)
+		//   https://github.com/oxidecomputer/oxide.rs/blob/17e3f58248832f977d366afdc69641551a62b1db/sdk/src/extras/disk.rs#L735
 		// round up to nearest block size
 		size = (size + blockSize) &^ blockSize
 		// create the disk
@@ -188,7 +198,10 @@ func ensureImagesExist(ctx context.Context, client *oxide.Client, projectID stri
 				Description: fmt.Sprintf("Disk for image '%s'", missingImage.Name),
 				Size:        oxide.ByteCount(size),
 				Name:        oxide.Name(missingImage.Name),
-				DiskSource:  oxide.DiskSource{Type: oxide.DiskSourceTypeBlank},
+				DiskSource: oxide.DiskSource{
+					Type:      oxide.DiskSourceTypeImportingBlocks,
+					BlockSize: blockSize, // TODO: Must be multiple of image size. Verify?
+				},
 			},
 		})
 		if err != nil {
@@ -196,12 +209,11 @@ func ensureImagesExist(ctx context.Context, client *oxide.Client, projectID stri
 		}
 		// import the data
 		if err := client.DiskBulkWriteImportStart(ctx, oxide.DiskBulkWriteImportStartParams{
-			Project: oxide.NameOrId(projectID),
-			Disk:    oxide.NameOrId(disk.Id),
+			Disk: oxide.NameOrId(disk.Id),
 		}); err != nil {
 			return nil, fmt.Errorf("failed to start bulk write import: %w", err)
 		}
-		// write in 1MB chunks or until finished
+		// write in 0.5MB chunks or until finished
 		f, err := os.Open(file.Name())
 		if err != nil {
 			return nil, fmt.Errorf("failed to open file: %w", err)
@@ -209,9 +221,9 @@ func ensureImagesExist(ctx context.Context, client *oxide.Client, projectID stri
 		defer f.Close()
 		var offset int
 		for {
-			buf := make([]byte, MB)
+			buf := make([]byte, MB/2)
 			n, err := f.Read(buf)
-			if err != nil {
+			if err != nil && err != io.EOF {
 				return nil, fmt.Errorf("failed to read file: %w", err)
 			}
 			if n == 0 {
@@ -219,8 +231,7 @@ func ensureImagesExist(ctx context.Context, client *oxide.Client, projectID stri
 			}
 			// convert the read data into base64. Why? because that is what oxide wants
 			if err := client.DiskBulkWriteImport(ctx, oxide.DiskBulkWriteImportParams{
-				Project: oxide.NameOrId(projectID),
-				Disk:    oxide.NameOrId(disk.Id),
+				Disk: oxide.NameOrId(disk.Id),
 				Body: &oxide.ImportBlocksBulkWrite{
 					Base64EncodedData: base64.StdEncoding.EncodeToString(buf[:n]),
 					Offset:            offset,
@@ -231,15 +242,13 @@ func ensureImagesExist(ctx context.Context, client *oxide.Client, projectID stri
 			offset += n
 		}
 		if err := client.DiskBulkWriteImportStop(ctx, oxide.DiskBulkWriteImportStopParams{
-			Project: oxide.NameOrId(projectID),
-			Disk:    oxide.NameOrId(disk.Id),
+			Disk: oxide.NameOrId(disk.Id),
 		}); err != nil {
 			return nil, fmt.Errorf("failed to stop bulk write import: %w", err)
 		}
 		// finalize the import
 		if err := client.DiskFinalizeImport(ctx, oxide.DiskFinalizeImportParams{
-			Disk:    oxide.NameOrId(disk.Id),
-			Project: oxide.NameOrId(projectID),
+			Disk: oxide.NameOrId(disk.Id),
 			Body: &oxide.FinalizeDisk{
 				SnapshotName: oxide.Name(snapshotName),
 			},
@@ -248,9 +257,16 @@ func ensureImagesExist(ctx context.Context, client *oxide.Client, projectID stri
 		}
 
 		client.DiskDelete(ctx, oxide.DiskDeleteParams{
-			Project: oxide.NameOrId(projectID),
-			Disk:    oxide.NameOrId(disk.Id),
+			Disk: oxide.NameOrId(disk.Id),
 		})
+
+		// Find snapshot Id by name.
+		snapshot, err := client.SnapshotView(ctx, oxide.SnapshotViewParams{
+			Snapshot: oxide.NameOrId(snapshotName), Project: oxide.NameOrId(projectID),
+		})
+		if err != nil {
+			return nil, fmt.Errorf("failed to find snapshot: %w", err)
+		}
 
 		image, err := client.ImageCreate(ctx, oxide.ImageCreateParams{
 			Project: oxide.NameOrId(projectID),
@@ -259,7 +275,7 @@ func ensureImagesExist(ctx context.Context, client *oxide.Client, projectID stri
 				Description: fmt.Sprintf("Image for '%s'", missingImage.Name),
 				Source: oxide.ImageSource{
 					Type: oxide.ImageSourceTypeSnapshot,
-					Id:   snapshotName,
+					Id:   snapshot.Id,
 				},
 			},
 		})
@@ -305,7 +321,10 @@ func downloadFile(filepath, url string) error {
 
 // ensureProjectExists checks if the right project exists and returns its ID
 func ensureProjectExists(ctx context.Context, client *oxide.Client) (string, error) {
-	projects, err := client.ProjectList(ctx, oxide.ProjectListParams{})
+	// TODO: We don't need to list Projects to find specific one, we can `View`
+	//       it by name.
+	// TODO: do we need pagination? Using arbitrary limit for now.
+	projects, err := client.ProjectList(ctx, oxide.ProjectListParams{Limit: 32})
 	if err != nil {
 		return "", fmt.Errorf("failed to list projects: %w", err)
 	}
@@ -335,7 +354,11 @@ func ensureProjectExists(ctx context.Context, client *oxide.Client) (string, err
 
 // ensureClusterExists checks if a k3s cluster exists, and creates one if needed
 func ensureClusterExists(ctx context.Context, client *oxide.Client, projectID string) error {
-	instances, err := client.InstanceList(ctx, oxide.InstanceListParams{Project: oxide.NameOrId(projectID)})
+	// TODO: endpoint is paginated, using arbitrary limit for now.
+	instances, err := client.InstanceList(ctx, oxide.InstanceListParams{
+		Project: oxide.NameOrId(projectID),
+		Limit:   32,
+	})
 	if err != nil {
 		return fmt.Errorf("failed to list instances: %w", err)
 	}
@@ -393,8 +416,9 @@ func ensureClusterExists(ctx context.Context, client *oxide.Client, projectID st
 				Ncpus:  oxide.InstanceCpuCount(controlPlaneCPU),
 				BootDisk: &oxide.InstanceDiskAttachment{
 					DiskSource: oxide.DiskSource{
-						Type:    oxide.DiskSourceTypeImage,
-						ImageId: controlPlaneImageName,
+						Type:      oxide.DiskSourceTypeImage,
+						ImageId:   controlPlaneImageName,
+						BlockSize: blockSize, // TODO: Must be multiple of image size. Verify?
 					},
 				},
 				UserData: cloudConfig,
@@ -455,8 +479,9 @@ func handleAddNode(w http.ResponseWriter, r *http.Request) {
 			Ncpus:  oxide.InstanceCpuCount(workerCPU),
 			BootDisk: &oxide.InstanceDiskAttachment{
 				DiskSource: oxide.DiskSource{
-					Type:    oxide.DiskSourceTypeImage,
-					ImageId: workerImageName,
+					Type:      oxide.DiskSourceTypeImage,
+					ImageId:   workerImageName,
+					BlockSize: blockSize, // TODO: Must be multiple of image size. Verify?
 				},
 			},
 			UserData: cloudConfig,
@@ -530,9 +555,9 @@ func main() {
 	rootCmd.Flags().StringVar(&clusterProject, "cluster-project", "ainekko-cluster", "Oxide project name for Kubernetes cluster")
 	rootCmd.Flags().StringVar(&controlPlanePrefix, "control-plane-prefix", "ainekko-control-plane-", "Prefix for control plane instances")
 	rootCmd.Flags().IntVar(&controlPlaneCount, "control-plane-count", 3, "Number of control plane instances to maintain")
-	rootCmd.Flags().StringVar(&controlPlaneImageName, "control-plane-image-name", "debian:12-cloud", "Image to use for control plane instances")
+	rootCmd.Flags().StringVar(&controlPlaneImageName, "control-plane-image-name", "debian-12-cloud", "Image to use for control plane instances")
 	rootCmd.Flags().StringVar(&controlPlaneImageSource, "control-plane-image-source", "https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-genericcloud-amd64.raw", "Image to use for control plane instances")
-	rootCmd.Flags().StringVar(&workerImageName, "worker-image", "debian:12-cloud", "Image to use for worker nodes")
+	rootCmd.Flags().StringVar(&workerImageName, "worker-image", "debian-12-cloud", "Image to use for worker nodes")
 	rootCmd.Flags().StringVar(&workerImageSource, "worker-image-source", "https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-genericcloud-amd64.raw", "Image to use for worker instances")
 	rootCmd.Flags().Uint64Var(&controlPlaneMemory, "control-plane-memory", 4, "Memory to allocate to each control plane node, in GB")
 	rootCmd.Flags().Uint64Var(&workerMemory, "worker-memory", 16, "Memory to allocate to each worker node, in GB")
