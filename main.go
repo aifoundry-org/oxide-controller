@@ -67,7 +67,7 @@ func getControlPlaneIP(ctx context.Context, client *oxide.Client, projectID stri
 	// TODO: Do we need pagination? Using arbitrary limit for now.
 	fips, err := client.FloatingIpList(ctx, oxide.FloatingIpListParams{
 		Project: oxide.NameOrId(projectID),
-		Limit:   32,
+		Limit:   oxide.NewPointer(32),
 	})
 	if err != nil {
 		return "", fmt.Errorf("failed to list floating IPs: %w", err)
@@ -136,7 +136,7 @@ func ensureImagesExist(ctx context.Context, client *oxide.Client, projectID stri
 	// TODO: We don't need to list images, we can `View` them by name -
 	//       `images` array is never long, few more requests shouldn't harm.
 	// TODO: Do we need pagination? Using arbitrary limit for now.
-	existing, err := client.ImageList(ctx, oxide.ImageListParams{Project: oxide.NameOrId(projectID), Limit: 32})
+	existing, err := client.ImageList(ctx, oxide.ImageListParams{Project: oxide.NameOrId(projectID), Limit: oxide.NewPointer(32)})
 	if err != nil {
 		return nil, fmt.Errorf("failed to list images: %w", err)
 	}
@@ -234,7 +234,7 @@ func ensureImagesExist(ctx context.Context, client *oxide.Client, projectID stri
 				Disk: oxide.NameOrId(disk.Id),
 				Body: &oxide.ImportBlocksBulkWrite{
 					Base64EncodedData: base64.StdEncoding.EncodeToString(buf[:n]),
-					Offset:            offset,
+					Offset:            &offset,
 				},
 			}); err != nil {
 				return nil, fmt.Errorf("failed to write data: %w", err)
@@ -324,7 +324,7 @@ func ensureProjectExists(ctx context.Context, client *oxide.Client) (string, err
 	// TODO: We don't need to list Projects to find specific one, we can `View`
 	//       it by name.
 	// TODO: do we need pagination? Using arbitrary limit for now.
-	projects, err := client.ProjectList(ctx, oxide.ProjectListParams{Limit: 32})
+	projects, err := client.ProjectList(ctx, oxide.ProjectListParams{Limit: oxide.NewPointer(32)})
 	if err != nil {
 		return "", fmt.Errorf("failed to list projects: %w", err)
 	}
@@ -357,7 +357,7 @@ func ensureClusterExists(ctx context.Context, client *oxide.Client, projectID st
 	// TODO: endpoint is paginated, using arbitrary limit for now.
 	instances, err := client.InstanceList(ctx, oxide.InstanceListParams{
 		Project: oxide.NameOrId(projectID),
-		Limit:   32,
+		Limit:   oxide.NewPointer(32),
 	})
 	if err != nil {
 		return fmt.Errorf("failed to list instances: %w", err)
