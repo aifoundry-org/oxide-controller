@@ -39,6 +39,7 @@ var (
 	workerMemory            uint64
 	controlPlaneCPU         uint16
 	workerCPU               uint16
+	clusterInitWait         int
 )
 
 // Node represents a Kubernetes node
@@ -62,7 +63,7 @@ func loadOxideToken() (string, error) {
 	return strings.TrimSpace(string(data)), nil
 }
 
-func getControlPlaneIP(ctx context.Context, client *oxide.Client, projectID string) (string, error) {
+func ensureControlPlaneIP(ctx context.Context, client *oxide.Client, projectID string) (string, error) {
 	var controlPlaneIP string
 	// TODO: Do we need pagination? Using arbitrary limit for now.
 	fips, err := client.FloatingIpList(ctx, oxide.FloatingIpListParams{
@@ -77,6 +78,22 @@ func getControlPlaneIP(ctx context.Context, client *oxide.Client, projectID stri
 			controlPlaneIP = fip.Ip
 			break
 		}
+	}
+	// what if we did not find one?
+	if controlPlaneIP == "" {
+		log.Printf("Control plane floating IP not found. Creating one...")
+		fip, err := client.FloatingIpCreate(ctx, oxide.FloatingIpCreateParams{
+			Project: oxide.NameOrId(projectID),
+			Body: &oxide.FloatingIpCreate{
+				Name:        oxide.Name(fmt.Sprintf("%s-floating-ip", controlPlanePrefix)),
+				Description: fmt.Sprintf("Floating IP for Kubernetes control plane nodes with prefix '%s'", controlPlanePrefix),
+			},
+		})
+		if err != nil {
+			return "", fmt.Errorf("failed to create floating IP: %w", err)
+		}
+		controlPlaneIP = fip.Ip
+		log.Printf("Created floating IP: %s", controlPlaneIP)
 	}
 	return controlPlaneIP, nil
 }
@@ -352,6 +369,35 @@ func ensureProjectExists(ctx context.Context, client *oxide.Client) (string, err
 	return projectID, nil
 }
 
+// createControlPlaneNodes creates new control plane nodes
+func createControlPlaneNodes(ctx context.Context, initCluster bool, count, start int, controlPlaneIP string, client *oxide.Client, projectID, joinToken string) ([]oxide.Instance, error) {
+	var controlPlaneNodes []oxide.Instance
+	cloudConfig := generateCloudConfig("server", initCluster, controlPlaneIP, joinToken)
+	for i := start; i < count; i++ {
+		instance, err := client.InstanceCreate(ctx, oxide.InstanceCreateParams{
+			Project: oxide.NameOrId(projectID),
+			Body: &oxide.InstanceCreate{
+				Name:   oxide.Name(fmt.Sprintf("%s%d", controlPlanePrefix, i)),
+				Memory: oxide.ByteCount(controlPlaneMemory * GB),
+				Ncpus:  oxide.InstanceCpuCount(controlPlaneCPU),
+				BootDisk: &oxide.InstanceDiskAttachment{
+					DiskSource: oxide.DiskSource{
+						Type:      oxide.DiskSourceTypeImage,
+						ImageId:   controlPlaneImageName,
+						BlockSize: blockSize, // TODO: Must be multiple of image size. Verify?
+					},
+				},
+				UserData: cloudConfig,
+			},
+		})
+		if err != nil {
+			return nil, fmt.Errorf("failed to create control plane node: %w", err)
+		}
+		controlPlaneNodes = append(controlPlaneNodes, *instance)
+	}
+	return controlPlaneNodes, nil
+}
+
 // ensureClusterExists checks if a k3s cluster exists, and creates one if needed
 func ensureClusterExists(ctx context.Context, client *oxide.Client, projectID string) error {
 	// TODO: endpoint is paginated, using arbitrary limit for now.
@@ -375,7 +421,7 @@ func ensureClusterExists(ctx context.Context, client *oxide.Client, projectID st
 		return nil
 	}
 
-	controlPlaneIP, err := getControlPlaneIP(ctx, client, projectID)
+	controlPlaneIP, err := ensureControlPlaneIP(ctx, client, projectID)
 	if err != nil {
 		return fmt.Errorf("failed to get control plane IP: %w", err)
 	}
@@ -395,37 +441,40 @@ func ensureClusterExists(ctx context.Context, client *oxide.Client, projectID st
 			highest = num
 		}
 	}
+
+	// if we did not have any nodes, create a cluster
+	if len(controlPlaneNodes) == 0 {
+		highest++
+		instances, err := createControlPlaneNodes(ctx, true, 1, highest, controlPlaneIP, client, projectID, "")
+		if err != nil {
+			return fmt.Errorf("failed to create control plane node: %w", err)
+		}
+		// wait for the control plane node to be up and running
+		timeLeft := time.Duration(clusterInitWait) * time.Minute
+		for {
+			log.Printf("Waiting %d mins for control plane node %s to be up and running...", timeLeft, controlPlaneIP)
+			sleepTime := 1 * time.Minute
+			time.Sleep(sleepTime)
+			timeLeft -= sleepTime
+			if timeLeft <= 0 {
+				log.Printf("Control plane node at %s should be up and running", controlPlaneIP)
+				break
+			}
+		}
+		controlPlaneNodes = append(controlPlaneNodes, instances[0])
+	}
+
+	// now that we have an initial node, we can get the join token
 	joinToken, err := getJoinToken(ctx, controlPlaneIP)
 	if err != nil {
 		return fmt.Errorf("failed to retrieve join token: %v", err)
 	}
 	// the number we want is the next one
-	for i := 0; i < controlPlaneCount-len(controlPlaneNodes); i++ {
-		highest++
-		// what if there were none?
-		var initCluster bool
-		if len(controlPlaneNodes) == 0 && i == 0 {
-			initCluster = true
-		}
-		cloudConfig := generateCloudConfig("server", initCluster, controlPlaneIP, joinToken)
-		if _, err := client.InstanceCreate(ctx, oxide.InstanceCreateParams{
-			Project: oxide.NameOrId(projectID),
-			Body: &oxide.InstanceCreate{
-				Name:   oxide.Name(fmt.Sprintf("%s%d", controlPlanePrefix, highest)),
-				Memory: oxide.ByteCount(controlPlaneMemory * GB),
-				Ncpus:  oxide.InstanceCpuCount(controlPlaneCPU),
-				BootDisk: &oxide.InstanceDiskAttachment{
-					DiskSource: oxide.DiskSource{
-						Type:      oxide.DiskSourceTypeImage,
-						ImageId:   controlPlaneImageName,
-						BlockSize: blockSize, // TODO: Must be multiple of image size. Verify?
-					},
-				},
-				UserData: cloudConfig,
-			},
-		}); err != nil {
-			return fmt.Errorf("failed to create control plane node: %w", err)
-		}
+	highest++
+	count := controlPlaneCount - len(controlPlaneNodes)
+	start := highest
+	if _, err := createControlPlaneNodes(ctx, false, count, start, controlPlaneIP, client, projectID, joinToken); err != nil {
+		return fmt.Errorf("failed to create control plane node: %w", err)
 	}
 
 	return nil
@@ -455,7 +504,7 @@ func handleAddNode(w http.ResponseWriter, r *http.Request) {
 	}
 
 	projectID := clusterProject
-	controlPlaneIP, err := getControlPlaneIP(ctx, client, projectID)
+	controlPlaneIP, err := ensureControlPlaneIP(ctx, client, projectID)
 	if err != nil {
 		log.Printf("Failed to retrieve control plane IP: %v", err)
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
@@ -563,6 +612,7 @@ func main() {
 	rootCmd.Flags().Uint64Var(&workerMemory, "worker-memory", 16, "Memory to allocate to each worker node, in GB")
 	rootCmd.Flags().Uint16Var(&controlPlaneCPU, "control-plane-cpu", 2, "vCPU count to allocate to each control plane node")
 	rootCmd.Flags().Uint16Var(&workerCPU, "worker-cpu", 4, "vCPU count to allocate to each worker node")
+	rootCmd.Flags().IntVar(&clusterInitWait, "cluster-init-wait", 5, "Time to wait for the first control plane node to be up and running (in minutes)")
 
 	// Execute CLI
 	if err := rootCmd.Execute(); err != nil {
