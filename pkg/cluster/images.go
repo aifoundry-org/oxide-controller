@@ -14,11 +14,12 @@ import (
 // ensureImagesExist checks if the right images exist and creates them if needed
 // they can exist at the silo or project level. However, if they do not exist, then they
 // will be created at the project level.
-func (c *Cluster) ensureImagesExist(ctx context.Context, images ...Image) ([]string, error) {
+// This is not a member function of Cluster, as it can be self-contained and therefore tested.
+func ensureImagesExist(ctx context.Context, client *oxide.Client, projectID string, images ...Image) ([]string, error) {
 	// TODO: We don't need to list images, we can `View` them by name -
 	//       `images` array is never long, few more requests shouldn't harm.
 	// TODO: Do we need pagination? Using arbitrary limit for now.
-	existing, err := c.client.ImageList(ctx, oxide.ImageListParams{Project: oxide.NameOrId(c.projectID), Limit: oxide.NewPointer(32)})
+	existing, err := client.ImageList(ctx, oxide.ImageListParams{Project: oxide.NameOrId(projectID), Limit: oxide.NewPointer(32)})
 	if err != nil {
 		return nil, fmt.Errorf("failed to list images: %w", err)
 	}
@@ -74,8 +75,8 @@ func (c *Cluster) ensureImagesExist(ctx context.Context, images ...Image) ([]str
 		// round up to nearest block size
 		size = (size + blockSize) &^ blockSize
 		// create the disk
-		disk, err := c.client.DiskCreate(ctx, oxide.DiskCreateParams{
-			Project: oxide.NameOrId(c.projectID),
+		disk, err := client.DiskCreate(ctx, oxide.DiskCreateParams{
+			Project: oxide.NameOrId(projectID),
 			Body: &oxide.DiskCreate{
 				Description: fmt.Sprintf("Disk for image '%s'", missingImage.Name),
 				Size:        oxide.ByteCount(size),
@@ -90,7 +91,7 @@ func (c *Cluster) ensureImagesExist(ctx context.Context, images ...Image) ([]str
 			return nil, fmt.Errorf("failed to create disk: %w", err)
 		}
 		// import the data
-		if err := c.client.DiskBulkWriteImportStart(ctx, oxide.DiskBulkWriteImportStartParams{
+		if err := client.DiskBulkWriteImportStart(ctx, oxide.DiskBulkWriteImportStartParams{
 			Disk: oxide.NameOrId(disk.Id),
 		}); err != nil {
 			return nil, fmt.Errorf("failed to start bulk write import: %w", err)
@@ -112,7 +113,7 @@ func (c *Cluster) ensureImagesExist(ctx context.Context, images ...Image) ([]str
 				break
 			}
 			// convert the read data into base64. Why? because that is what oxide wants
-			if err := c.client.DiskBulkWriteImport(ctx, oxide.DiskBulkWriteImportParams{
+			if err := client.DiskBulkWriteImport(ctx, oxide.DiskBulkWriteImportParams{
 				Disk: oxide.NameOrId(disk.Id),
 				Body: &oxide.ImportBlocksBulkWrite{
 					Base64EncodedData: base64.StdEncoding.EncodeToString(buf[:n]),
@@ -123,13 +124,13 @@ func (c *Cluster) ensureImagesExist(ctx context.Context, images ...Image) ([]str
 			}
 			offset += n
 		}
-		if err := c.client.DiskBulkWriteImportStop(ctx, oxide.DiskBulkWriteImportStopParams{
+		if err := client.DiskBulkWriteImportStop(ctx, oxide.DiskBulkWriteImportStopParams{
 			Disk: oxide.NameOrId(disk.Id),
 		}); err != nil {
 			return nil, fmt.Errorf("failed to stop bulk write import: %w", err)
 		}
 		// finalize the import
-		if err := c.client.DiskFinalizeImport(ctx, oxide.DiskFinalizeImportParams{
+		if err := client.DiskFinalizeImport(ctx, oxide.DiskFinalizeImportParams{
 			Disk: oxide.NameOrId(disk.Id),
 			Body: &oxide.FinalizeDisk{
 				SnapshotName: oxide.Name(snapshotName),
@@ -138,20 +139,20 @@ func (c *Cluster) ensureImagesExist(ctx context.Context, images ...Image) ([]str
 			return nil, fmt.Errorf("failed to finalize import: %w", err)
 		}
 
-		c.client.DiskDelete(ctx, oxide.DiskDeleteParams{
+		client.DiskDelete(ctx, oxide.DiskDeleteParams{
 			Disk: oxide.NameOrId(disk.Id),
 		})
 
 		// Find snapshot Id by name.
-		snapshot, err := c.client.SnapshotView(ctx, oxide.SnapshotViewParams{
-			Snapshot: oxide.NameOrId(snapshotName), Project: oxide.NameOrId(c.projectID),
+		snapshot, err := client.SnapshotView(ctx, oxide.SnapshotViewParams{
+			Snapshot: oxide.NameOrId(snapshotName), Project: oxide.NameOrId(projectID),
 		})
 		if err != nil {
 			return nil, fmt.Errorf("failed to find snapshot: %w", err)
 		}
 
-		image, err := c.client.ImageCreate(ctx, oxide.ImageCreateParams{
-			Project: oxide.NameOrId(c.projectID),
+		image, err := client.ImageCreate(ctx, oxide.ImageCreateParams{
+			Project: oxide.NameOrId(projectID),
 			Body: &oxide.ImageCreate{
 				Name:        oxide.Name(missingImage.Name),
 				Description: fmt.Sprintf("Image for '%s'", missingImage.Name),

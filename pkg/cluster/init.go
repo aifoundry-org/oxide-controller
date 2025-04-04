@@ -5,9 +5,9 @@ import (
 	"fmt"
 )
 
-func (c *Cluster) Initialize(ctx context.Context, kubeconfig, pubkey []byte, prefix string, controlPlaneCount int, controlPlaneImage, workerImage Image, controlPlaneMemoryGB, controlPlanCPUCount, timeoutMinutes int, secretName string) (newKubeconfig []byte, err error) {
+func (c *Cluster) Initialize(ctx context.Context, timeoutMinutes int) (newKubeconfig []byte, err error) {
 
-	projectID, err := c.ensureProjectExists(ctx)
+	projectID, err := ensureProjectExists(ctx, c.logger, c.client, c.projectID)
 	if err != nil {
 		return nil, fmt.Errorf("project verification failed: %v", err)
 	}
@@ -16,9 +16,9 @@ func (c *Cluster) Initialize(ctx context.Context, kubeconfig, pubkey []byte, pre
 		c.logger.Infof("Using project ID: %s", c.projectID)
 	}
 
-	if _, err := c.ensureImagesExist(ctx, controlPlaneImage, workerImage); err != nil {
+	if _, err := ensureImagesExist(ctx, c.client, c.projectID, c.controlPlaneImage, c.workerImage); err != nil {
 		return nil, fmt.Errorf("image verification failed: %v", err)
 	}
 
-	return c.ensureClusterExists(ctx, kubeconfig, pubkey, prefix, controlPlaneCount, controlPlaneImage.Name, controlPlaneMemoryGB, controlPlanCPUCount, timeoutMinutes, secretName)
+	return c.ensureClusterExists(ctx, timeoutMinutes)
 }

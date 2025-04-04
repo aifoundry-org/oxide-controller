@@ -87,16 +87,15 @@ func rootCmd() (*cobra.Command, error) {
 
 			ctx := context.Background()
 
-			c := cluster.New(logger, oxideClient, clusterProject)
-			logger.Debugf("Ensuring project exists: %s", clusterProject)
-			newKubeconfig, err := c.Initialize(ctx, kubeconfig, pubkey,
+			c := cluster.New(logger, oxideClient, clusterProject,
 				controlPlanePrefix, controlPlaneCount,
 				cluster.Image{Name: controlPlaneImageName, Source: controlPlaneImageSource},
 				cluster.Image{Name: workerImageName, Source: workerImageSource},
 				int(controlPlaneMemory), int(controlPlaneCPU),
-				clusterInitWait,
-				controlPlaneSecret,
+				controlPlaneSecret, kubeconfig, pubkey,
 			)
+			logger.Debugf("Ensuring project exists: %s", clusterProject)
+			newKubeconfig, err := c.Initialize(ctx, clusterInitWait)
 			if err != nil {
 				return fmt.Errorf("failed to initialize setup: %v", err)
 			}

@@ -14,25 +14,50 @@ import (
 )
 
 type Cluster struct {
-	logger    *log.Logger
-	client    *oxide.Client
-	projectID string
+	logger                                     *log.Logger
+	client                                     *oxide.Client
+	projectID                                  string
+	prefix                                     string
+	controlPlaneCount                          int
+	controlPlaneImage, workerImage             Image
+	controlPlaneMemoryGB, controlPlaneCPUCount int
+	secretName                                 string
+	kubeconfig, userPubkey                     []byte
 }
 
 // New creates a new Cluster instance
-func New(logger *log.Logger, client *oxide.Client, projectID string) *Cluster {
+func New(logger *log.Logger, client *oxide.Client, projectID string, prefix string, controlPlaneCount int, controlPlaneImage, workerImage Image, controlPlaneMemoryGB, controlPlaneCPUCount int, secretName string, kubeconfig, pubkey []byte) *Cluster {
 	return &Cluster{
-		logger:    logger,
-		client:    client,
-		projectID: projectID,
+		logger:               logger,
+		client:               client,
+		projectID:            projectID,
+		prefix:               prefix,
+		controlPlaneCount:    controlPlaneCount,
+		controlPlaneImage:    controlPlaneImage,
+		workerImage:          workerImage,
+		controlPlaneMemoryGB: controlPlaneMemoryGB,
+		controlPlaneCPUCount: controlPlaneCPUCount,
+		secretName:           secretName,
+		kubeconfig:           kubeconfig,
+		userPubkey:           pubkey,
 	}
 }
 
 // ensureClusterExists checks if a k3s cluster exists, and creates one if needed
-func (c *Cluster) ensureClusterExists(ctx context.Context, kubeconfig, userPubKey []byte, controlPlanePrefix string, controlPlaneCount int, controlPlaneImage string, memoryGB, cpuCount int, timeoutMinutes int, secretName string) (newKubeconfig []byte, err error) {
+func (c *Cluster) ensureClusterExists(ctx context.Context, timeoutMinutes int) (newKubeconfig []byte, err error) {
+	// local vars just for convenience
+	client := c.client
+	projectID := c.projectID
+	controlPlanePrefix := c.prefix
+	controlPlaneCount := c.controlPlaneCount
+	controlPlaneImage := c.controlPlaneImage
+	memoryGB := c.controlPlaneMemoryGB
+	cpuCount := c.controlPlaneCPUCount
+	secretName := c.secretName
+
 	// TODO: endpoint is paginated, using arbitrary limit for now.
-	instances, err := c.client.InstanceList(ctx, oxide.InstanceListParams{
-		Project: oxide.NameOrId(c.projectID),
+	instances, err := client.InstanceList(ctx, oxide.InstanceListParams{
+		Project: oxide.NameOrId(projectID),
 		Limit:   oxide.NewPointer(32),
 	})
 	if err != nil {
@@ -72,9 +97,10 @@ func (c *Cluster) ensureClusterExists(ctx context.Context, kubeconfig, userPubKe
 		}
 	}
 
+	var kubeconfig = c.kubeconfig
 	// if we did not have any nodes, create a cluster
 	if len(controlPlaneNodes) == 0 {
-		if len(kubeconfig) > 0 {
+		if len(c.kubeconfig) > 0 {
 			return nil, fmt.Errorf("kubeconfig already exists but cluster does not")
 		}
 		highest++
@@ -84,12 +110,12 @@ func (c *Cluster) ensureClusterExists(ctx context.Context, kubeconfig, userPubKe
 			return nil, fmt.Errorf("failed to generate SSH key pair: %w", err)
 		}
 		var pubkeyList []string
-		if userPubKey != nil {
-			pubkeyList = append(pubkeyList, string(userPubKey))
+		if c.userPubkey != nil {
+			pubkeyList = append(pubkeyList, string(c.userPubkey))
 		}
 		pubkeyList = append(pubkeyList, string(pub))
 		// add the public key to the node in addition to the user one
-		instances, err := c.createControlPlaneNodes(ctx, true, 1, highest, controlPlaneIP.Ip, "", pubkeyList, controlPlanePrefix, controlPlaneImage, memoryGB, cpuCount)
+		instances, err := c.createControlPlaneNodes(ctx, true, 1, highest, controlPlaneIP.Ip, "", pubkeyList, controlPlanePrefix, controlPlaneImage.Name, memoryGB, cpuCount)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create control plane node: %w", err)
 		}
@@ -97,9 +123,9 @@ func (c *Cluster) ensureClusterExists(ctx context.Context, kubeconfig, userPubKe
 			return nil, fmt.Errorf("created 0 control plane nodes")
 		}
 		hostid := instances[0].Id
-		ipList, err := c.client.InstanceExternalIpList(ctx, oxide.InstanceExternalIpListParams{
+		ipList, err := client.InstanceExternalIpList(ctx, oxide.InstanceExternalIpListParams{
 			Instance: oxide.NameOrId(hostid),
-			Project:  oxide.NameOrId(c.projectID),
+			Project:  oxide.NameOrId(projectID),
 		})
 		if err != nil {
 			return nil, fmt.Errorf("failed to get external IP list: %w", err)
@@ -125,9 +151,9 @@ func (c *Cluster) ensureClusterExists(ctx context.Context, kubeconfig, userPubKe
 			}
 		}
 		// attach the floating IP to the control plane node
-		if _, err := c.client.FloatingIpAttach(ctx, oxide.FloatingIpAttachParams{
+		if _, err := client.FloatingIpAttach(ctx, oxide.FloatingIpAttachParams{
 			FloatingIp: oxide.NameOrId(controlPlaneIP.Id),
-			Project:    oxide.NameOrId(c.projectID),
+			Project:    oxide.NameOrId(projectID),
 			Body: &oxide.FloatingIpAttach{
 				Kind:   oxide.FloatingIpParentKindInstance,
 				Parent: oxide.NameOrId(hostid),
@@ -147,8 +173,8 @@ func (c *Cluster) ensureClusterExists(ctx context.Context, kubeconfig, userPubKe
 		secrets[secretKeyJoinToken] = joinToken
 
 		// save the user ssh public key to the secrets map
-		if userPubKey != nil {
-			secrets[secretKeyUserSSH] = userPubKey
+		if c.userPubkey != nil {
+			secrets[secretKeyUserSSH] = c.userPubkey
 		}
 
 		// get the kubeconfig
@@ -173,7 +199,7 @@ func (c *Cluster) ensureClusterExists(ctx context.Context, kubeconfig, userPubKe
 	// the number we want is the next one
 	highest++
 	count := controlPlaneCount - len(controlPlaneNodes)
-	if _, err := c.createControlPlaneNodes(ctx, false, count, highest, controlPlaneIP.Ip, joinToken, []string{string(userPubKey)}, controlPlanePrefix, controlPlaneImage, memoryGB, cpuCount); err != nil {
+	if _, err := c.createControlPlaneNodes(ctx, false, count, highest, controlPlaneIP.Ip, joinToken, []string{string(c.userPubkey)}, controlPlanePrefix, controlPlaneImage.Name, memoryGB, cpuCount); err != nil {
 		return nil, fmt.Errorf("failed to create control plane node: %w", err)
 	}
 
