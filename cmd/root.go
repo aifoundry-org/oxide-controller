@@ -3,9 +3,9 @@ package cmd
 import (
 	"context"
 	"fmt"
-	"log"
 
 	"github.com/oxidecomputer/oxide.go/oxide"
+	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 
 	"github.com/aifoundry-org/oxide-controller/pkg/cluster"

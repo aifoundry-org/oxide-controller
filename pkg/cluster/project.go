@@ -3,9 +3,9 @@ package cluster
 import (
 	"context"
 	"fmt"
-	"log"
 
 	"github.com/oxidecomputer/oxide.go/oxide"
+	log "github.com/sirupsen/logrus"
 )
 
 // ensureProjectExists checks if the right project exists and returns its ID

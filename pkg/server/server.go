@@ -2,12 +2,13 @@ package server
 
 import (
 	"fmt"
-	"log"
 	"net/http"
 	"time"
 
 	"github.com/aifoundry-org/oxide-controller/pkg/cluster"
+
 	"github.com/oxidecomputer/oxide.go/oxide"
+	log "github.com/sirupsen/logrus"
 )
 
 type Server struct {

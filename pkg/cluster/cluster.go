@@ -3,13 +3,14 @@ package cluster
 import (
 	"context"
 	"fmt"
-	"log"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/aifoundry-org/oxide-controller/pkg/util"
+
 	"github.com/oxidecomputer/oxide.go/oxide"
+	log "github.com/sirupsen/logrus"
 )
 
 // ensureClusterExists checks if a k3s cluster exists, and creates one if needed

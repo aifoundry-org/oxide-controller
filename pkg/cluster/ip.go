@@ -3,10 +3,10 @@ package cluster
 import (
 	"context"
 	"fmt"
-	"log"
 	"strings"
 
 	"github.com/oxidecomputer/oxide.go/oxide"
+	log "github.com/sirupsen/logrus"
 )
 
 func GetControlPlaneIP(ctx context.Context, client *oxide.Client, projectID, controlPlanePrefix string) (*oxide.FloatingIp, error) {
