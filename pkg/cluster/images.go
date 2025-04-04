@@ -26,6 +26,7 @@ func ensureImagesExist(ctx context.Context, logger *log.Entry, client *oxide.Cli
 	if err != nil {
 		return nil, fmt.Errorf("failed to list images: %w", err)
 	}
+	logger.Infof("Existing images %v", existing)
 	logger.Debugf("total images %d", len(existing.Items))
 	var (
 		missingImages []Image
@@ -44,6 +45,7 @@ func ensureImagesExist(ctx context.Context, logger *log.Entry, client *oxide.Cli
 			idMap[name] = imageMap[name]
 			image.ID = imageMap[name].Id
 			image.Size = int(imageMap[name].Size)
+			logger.Infof("Iimage ID %s", image.ID)
 		}
 	}
 
@@ -181,7 +183,9 @@ func ensureImagesExist(ctx context.Context, logger *log.Entry, client *oxide.Cli
 		} else {
 			image.ID = oxImage.Id
 			image.Size = int(oxImage.Size)
+			logger.Infof("Again Iimage ID %s", image.ID)
 		}
 	}
+	logger.Infof("Images type  %T", images)
 	return images, nil
 }
