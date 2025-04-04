@@ -32,11 +32,25 @@ func rootCmd() (*cobra.Command, error) {
 		userSSHPublicKey        string
 		kubeconfigPath          string
 		controlPlaneSecret      string
+		verbose                 int
+
+		logger = log.New()
 	)
 
 	cmd := &cobra.Command{
 		Use:   "node-manager",
 		Short: "Node Management Service",
+		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+			switch verbose {
+			case 0:
+				logger.SetLevel(log.InfoLevel)
+			case 1:
+				logger.SetLevel(log.DebugLevel)
+			case 2:
+				logger.SetLevel(log.TraceLevel)
+			}
+			return nil
+		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			log.Println("Starting Node Management Service...")
 
@@ -67,7 +81,9 @@ func rootCmd() (*cobra.Command, error) {
 			}
 
 			ctx := context.Background()
-			newKubeconfig, err := cluster.Initialize(ctx, kubeconfig, pubkey, oxideClient, clusterProject,
+
+			c := cluster.New(logger, oxideClient, clusterProject)
+			newKubeconfig, err := c.Initialize(ctx, kubeconfig, pubkey,
 				controlPlanePrefix, controlPlaneCount,
 				cluster.Image{Name: controlPlaneImageName, Source: controlPlaneImageSource},
 				cluster.Image{Name: workerImageName, Source: workerImageSource},
@@ -85,7 +101,7 @@ func rootCmd() (*cobra.Command, error) {
 			}
 
 			// serve REST endpoints
-			s := server.New(":8080", oxideClient, controlPlaneSecret, clusterProject, controlPlanePrefix, workerImageName, int(workerMemory), int(workerCPU))
+			s := server.New(":8080", logger, oxideClient, controlPlaneSecret, clusterProject, controlPlanePrefix, workerImageName, int(workerMemory), int(workerCPU))
 			return s.Serve()
 		},
 	}
@@ -108,6 +124,7 @@ func rootCmd() (*cobra.Command, error) {
 	cmd.Flags().StringVar(&userSSHPublicKey, "user-ssh-public-key", "", "Path to public key to inject in all deployed cloud instances")
 	cmd.Flags().StringVar(&kubeconfigPath, "kubeconfig", "~/.kube/oxide-controller-config", "Path to save kubeconfig when generating new cluster, or to use for accessing existing cluster")
 	cmd.Flags().StringVar(&controlPlaneSecret, "control-plane-secret", "kube-system/oxide-controller-secret", "secret in Kubernetes cluster where the following are stored: join token, user ssh public key, controller ssh private/public keypair; should be as <namespace>/<name>")
+	cmd.Flags().IntVarP(&verbose, "verbose", "v", 0, "set log level, 0 is info, 1 is debug, 2 is trace")
 
 	return cmd, nil
 }

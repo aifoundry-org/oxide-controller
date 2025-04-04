@@ -29,17 +29,17 @@ func GetControlPlaneIP(ctx context.Context, client *oxide.Client, projectID, con
 	return controlPlaneIP, nil
 }
 
-func ensureControlPlaneIP(ctx context.Context, client *oxide.Client, projectID, controlPlanePrefix string) (*oxide.FloatingIp, error) {
+func (c *Cluster) ensureControlPlaneIP(ctx context.Context, controlPlanePrefix string) (*oxide.FloatingIp, error) {
 	var controlPlaneIP *oxide.FloatingIp
-	controlPlaneIP, err := GetControlPlaneIP(ctx, client, projectID, controlPlanePrefix)
+	controlPlaneIP, err := GetControlPlaneIP(ctx, c.client, c.projectID, controlPlanePrefix)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get control plane IP: %w", err)
 	}
 	// what if we did not find one?
 	if controlPlaneIP == nil {
 		log.Printf("Control plane floating IP not found. Creating one...")
-		fip, err := client.FloatingIpCreate(ctx, oxide.FloatingIpCreateParams{
-			Project: oxide.NameOrId(projectID),
+		fip, err := c.client.FloatingIpCreate(ctx, oxide.FloatingIpCreateParams{
+			Project: oxide.NameOrId(c.projectID),
 			Body: &oxide.FloatingIpCreate{
 				Name:        oxide.Name(fmt.Sprintf("%s-floating-ip", controlPlanePrefix)),
 				Description: fmt.Sprintf("Floating IP for Kubernetes control plane nodes with prefix '%s'", controlPlanePrefix),

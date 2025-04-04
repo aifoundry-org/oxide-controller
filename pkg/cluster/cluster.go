@@ -13,11 +13,26 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
+type Cluster struct {
+	logger    *log.Logger
+	client    *oxide.Client
+	projectID string
+}
+
+// New creates a new Cluster instance
+func New(logger *log.Logger, client *oxide.Client, projectID string) *Cluster {
+	return &Cluster{
+		logger:    logger,
+		client:    client,
+		projectID: projectID,
+	}
+}
+
 // ensureClusterExists checks if a k3s cluster exists, and creates one if needed
-func ensureClusterExists(ctx context.Context, client *oxide.Client, projectID string, kubeconfig, userPubKey []byte, controlPlanePrefix string, controlPlaneCount int, controlPlaneImage string, memoryGB, cpuCount int, timeoutMinutes int, secretName string) (newKubeconfig []byte, err error) {
+func (c *Cluster) ensureClusterExists(ctx context.Context, kubeconfig, userPubKey []byte, controlPlanePrefix string, controlPlaneCount int, controlPlaneImage string, memoryGB, cpuCount int, timeoutMinutes int, secretName string) (newKubeconfig []byte, err error) {
 	// TODO: endpoint is paginated, using arbitrary limit for now.
-	instances, err := client.InstanceList(ctx, oxide.InstanceListParams{
-		Project: oxide.NameOrId(projectID),
+	instances, err := c.client.InstanceList(ctx, oxide.InstanceListParams{
+		Project: oxide.NameOrId(c.projectID),
 		Limit:   oxide.NewPointer(32),
 	})
 	if err != nil {
@@ -36,7 +51,7 @@ func ensureClusterExists(ctx context.Context, client *oxide.Client, projectID st
 		return nil, nil
 	}
 
-	controlPlaneIP, err := ensureControlPlaneIP(ctx, client, projectID, controlPlanePrefix)
+	controlPlaneIP, err := c.ensureControlPlaneIP(ctx, controlPlanePrefix)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get control plane IP: %w", err)
 	}
@@ -74,7 +89,7 @@ func ensureClusterExists(ctx context.Context, client *oxide.Client, projectID st
 		}
 		pubkeyList = append(pubkeyList, string(pub))
 		// add the public key to the node in addition to the user one
-		instances, err := createControlPlaneNodes(ctx, true, 1, highest, controlPlaneIP.Ip, client, projectID, "", pubkeyList, controlPlanePrefix, controlPlaneImage, memoryGB, cpuCount)
+		instances, err := c.createControlPlaneNodes(ctx, true, 1, highest, controlPlaneIP.Ip, "", pubkeyList, controlPlanePrefix, controlPlaneImage, memoryGB, cpuCount)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create control plane node: %w", err)
 		}
@@ -82,9 +97,9 @@ func ensureClusterExists(ctx context.Context, client *oxide.Client, projectID st
 			return nil, fmt.Errorf("created 0 control plane nodes")
 		}
 		hostid := instances[0].Id
-		ipList, err := client.InstanceExternalIpList(ctx, oxide.InstanceExternalIpListParams{
+		ipList, err := c.client.InstanceExternalIpList(ctx, oxide.InstanceExternalIpListParams{
 			Instance: oxide.NameOrId(hostid),
-			Project:  oxide.NameOrId(projectID),
+			Project:  oxide.NameOrId(c.projectID),
 		})
 		if err != nil {
 			return nil, fmt.Errorf("failed to get external IP list: %w", err)
@@ -110,9 +125,9 @@ func ensureClusterExists(ctx context.Context, client *oxide.Client, projectID st
 			}
 		}
 		// attach the floating IP to the control plane node
-		if _, err := client.FloatingIpAttach(ctx, oxide.FloatingIpAttachParams{
+		if _, err := c.client.FloatingIpAttach(ctx, oxide.FloatingIpAttachParams{
 			FloatingIp: oxide.NameOrId(controlPlaneIP.Id),
-			Project:    oxide.NameOrId(projectID),
+			Project:    oxide.NameOrId(c.projectID),
 			Body: &oxide.FloatingIpAttach{
 				Kind:   oxide.FloatingIpParentKindInstance,
 				Parent: oxide.NameOrId(hostid),
@@ -158,7 +173,7 @@ func ensureClusterExists(ctx context.Context, client *oxide.Client, projectID st
 	// the number we want is the next one
 	highest++
 	count := controlPlaneCount - len(controlPlaneNodes)
-	if _, err := createControlPlaneNodes(ctx, false, count, highest, controlPlaneIP.Ip, client, projectID, joinToken, []string{string(userPubKey)}, controlPlanePrefix, controlPlaneImage, memoryGB, cpuCount); err != nil {
+	if _, err := c.createControlPlaneNodes(ctx, false, count, highest, controlPlaneIP.Ip, joinToken, []string{string(userPubKey)}, controlPlanePrefix, controlPlaneImage, memoryGB, cpuCount); err != nil {
 		return nil, fmt.Errorf("failed to create control plane node: %w", err)
 	}
 

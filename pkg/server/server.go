@@ -12,6 +12,7 @@ import (
 )
 
 type Server struct {
+	logger         *log.Logger
 	address        string
 	oxideClient    *oxide.Client
 	secretName     string
@@ -22,8 +23,9 @@ type Server struct {
 	workerCPUCount int
 }
 
-func New(address string, oxideClient *oxide.Client, secretName, projectID, prefix, workerImage string, workerMemoryGB, workerCPUCount int) *Server {
+func New(address string, logger *log.Logger, oxideClient *oxide.Client, secretName, projectID, prefix, workerImage string, workerMemoryGB, workerCPUCount int) *Server {
 	return &Server{
+		logger:         logger,
 		address:        address,
 		oxideClient:    oxideClient,
 		secretName:     secretName,
@@ -40,18 +42,18 @@ func (s *Server) Serve() error {
 	http.HandleFunc("/nodes/add", s.handleAddNode)
 
 	// Start HTTP server
-	log.Println("API listening on port 8080")
+	s.logger.Println("API listening on port 8080")
 	return http.ListenAndServe(s.address, nil)
 }
 
 // handleAddNode creates a new worker node
 func (s *Server) handleAddNode(w http.ResponseWriter, r *http.Request) {
-	log.Println("Processing request to add a worker node...")
+	s.logger.Println("Processing request to add a worker node...")
 	ctx := r.Context()
 
 	controlPlaneIP, err := cluster.GetControlPlaneIP(ctx, s.oxideClient, s.projectID, s.prefix)
 	if err != nil {
-		log.Printf("Failed to retrieve control plane IP: %v", err)
+		s.logger.Printf("Failed to retrieve control plane IP: %v", err)
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		return
 	}
@@ -59,14 +61,14 @@ func (s *Server) handleAddNode(w http.ResponseWriter, r *http.Request) {
 	// now that we have an initial node, we can get the join token
 	joinToken, err := cluster.GetJoinToken(ctx, nil, s.secretName)
 	if err != nil {
-		log.Printf("Failed to retrieve join token: %v", err)
+		s.logger.Printf("Failed to retrieve join token: %v", err)
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		return
 	}
 
 	pubkey, err := cluster.GetUserSSHPublicKey(ctx, nil, s.secretName)
 	if err != nil {
-		log.Printf("Failed to retrieve SSH public key: %v", err)
+		s.logger.Printf("Failed to retrieve SSH public key: %v", err)
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		return
 	}
@@ -74,18 +76,18 @@ func (s *Server) handleAddNode(w http.ResponseWriter, r *http.Request) {
 	workerName := fmt.Sprintf("worker-%d", time.Now().Unix())
 	cloudConfig, err := cluster.GenerateCloudConfig("agent", false, controlPlaneIP.Ip, joinToken, []string{string(pubkey)})
 	if err != nil {
-		log.Printf("Failed to generate cloud config: %v", err)
+		s.logger.Printf("Failed to generate cloud config: %v", err)
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		return
 	}
-	log.Printf("Creating worker node: %s", workerName)
+	s.logger.Printf("Creating worker node: %s", workerName)
 	if _, err := cluster.CreateInstance(ctx, s.oxideClient, s.projectID, workerName, s.workerImage, s.workerMemoryGB, s.workerCPUCount, cloudConfig); err != nil {
-		log.Printf("Failed to create worker node: %v", err)
+		s.logger.Printf("Failed to create worker node: %v", err)
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		return
 	}
 	if err != nil {
-		log.Printf("Failed to create worker node: %v", err)
+		s.logger.Printf("Failed to create worker node: %v", err)
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		return
 	}
