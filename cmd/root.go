@@ -65,7 +65,7 @@ func rootCmd() (*cobra.Command, error) {
 			}
 
 			logentry.Debugf("Loading kubeconfig from %s", kubeconfigPath)
-			kubeconfig, err := util.LoadFile(kubeconfigPath)
+			kubeconfig, err := util.LoadFileAllowMissing(kubeconfigPath)
 			if err != nil {
 				return fmt.Errorf("failed to load kubeconfig at %s: %w", kubeconfigPath, err)
 			}
