@@ -25,6 +25,7 @@ func (c *Cluster) Initialize(ctx context.Context, timeoutMinutes int) (newKubeco
 	if len(images) != 2 {
 		return nil, fmt.Errorf("expected 2 images, got %d", len(images))
 	}
+	c.logger.Infof("images %v", images)
 	c.controlPlaneSpec.Image = images[0]
 	c.controlPlaneSpec.DiskSize = util.RoundUp(images[0].Size, GB)
 	c.workerSpec.Image = images[1]

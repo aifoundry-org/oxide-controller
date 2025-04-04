@@ -86,15 +86,27 @@ runcmd:
 func (c *Cluster) CreateControlPlaneNodes(ctx context.Context, initCluster bool, count, start int, additionalPubKeys []string) ([]oxide.Instance, error) {
 	var controlPlaneNodes []oxide.Instance
 	c.logger.Debugf("Creating %d control plane nodes with prefix %s", count, c.prefix)
-	joinToken, err := c.GetJoinToken(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get join token: %w", err)
+
+	var joinToken string
+	var pubkey []byte
+	var err error
+
+	if !initCluster {
+		joinToken, err = c.GetJoinToken(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get join token: %w", err)
+		}
+		pubkey, err = c.GetUserSSHPublicKey(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get user SSH public key: %w", err)
+		}
 	}
-	pubkey, err := c.GetUserSSHPublicKey(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get user SSH public key: %w", err)
+
+	pubKeyList := []string{}
+
+	if len(pubkey) > 0 {
+		pubKeyList = append(pubKeyList, string(pubkey))
 	}
-	pubKeyList := []string{string(pubkey)}
 	if additionalPubKeys != nil {
 		pubKeyList = append(pubKeyList, additionalPubKeys...)
 	}
