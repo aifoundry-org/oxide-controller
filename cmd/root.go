@@ -82,7 +82,6 @@ func rootCmd() (*cobra.Command, error) {
 				if err := util.SaveFileIfNotExists(kubeconfigPath, newKubeconfig); err != nil {
 					return fmt.Errorf("failed to save kubeconfig: %w", err)
 				}
-				kubeconfig = newKubeconfig
 			}
 
 			// serve REST endpoints
