@@ -117,7 +117,7 @@ func (c *Cluster) ensureClusterExists(ctx context.Context, timeoutMinutes int) (
 		}
 		pubkeyList = append(pubkeyList, string(pub))
 		// add the public key to the node in addition to the user one
-		instances, err := c.createControlPlaneNodes(ctx, true, 1, highest, controlPlaneIP.Ip, "", pubkeyList, controlPlanePrefix, controlPlaneImage.Name, memoryGB, cpuCount)
+		instances, err := c.createControlPlaneNodes(ctx, true, 1, highest, controlPlaneIP, "", pubkeyList, controlPlanePrefix, controlPlaneImage.Name, memoryGB, cpuCount)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create control plane node: %w", err)
 		}
@@ -127,7 +127,6 @@ func (c *Cluster) ensureClusterExists(ctx context.Context, timeoutMinutes int) (
 		hostid := instances[0].Id
 		ipList, err := client.InstanceExternalIpList(ctx, oxide.InstanceExternalIpListParams{
 			Instance: oxide.NameOrId(hostid),
-			Project:  oxide.NameOrId(projectID),
 		})
 		if err != nil {
 			return nil, fmt.Errorf("failed to get external IP list: %w", err)
@@ -207,7 +206,7 @@ func (c *Cluster) ensureClusterExists(ctx context.Context, timeoutMinutes int) (
 	count := controlPlaneCount - len(controlPlaneNodes)
 	c.logger.Debugf("control plane nodes %d, desired %d, creating %d", len(controlPlaneNodes), controlPlaneCount, count)
 
-	if _, err := c.createControlPlaneNodes(ctx, false, count, highest, controlPlaneIP.Ip, joinToken, []string{string(c.userPubkey)}, controlPlanePrefix, controlPlaneImage.Name, memoryGB, cpuCount); err != nil {
+	if _, err := c.createControlPlaneNodes(ctx, false, count, highest, nil, joinToken, []string{string(c.userPubkey)}, controlPlanePrefix, controlPlaneImage.Name, memoryGB, cpuCount); err != nil {
 		return nil, fmt.Errorf("failed to create control plane node: %w", err)
 	}
 

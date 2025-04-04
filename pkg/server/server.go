@@ -81,7 +81,7 @@ func (s *Server) handleAddNode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.logger.Printf("Creating worker node: %s", workerName)
-	if _, err := cluster.CreateInstance(ctx, s.oxideClient, s.projectID, workerName, s.workerImage, s.workerMemoryGB, s.workerCPUCount, cloudConfig); err != nil {
+	if _, err := cluster.CreateInstance(ctx, s.oxideClient, s.projectID, workerName, s.workerImage, s.workerMemoryGB, s.workerCPUCount, cloudConfig, nil); err != nil {
 		s.logger.Debugf("Failed to create worker node: %v", err)
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		return
