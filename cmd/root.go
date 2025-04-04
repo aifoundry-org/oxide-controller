@@ -39,8 +39,8 @@ func rootCmd() (*cobra.Command, error) {
 	)
 
 	cmd := &cobra.Command{
-		Use:   "node-manager",
-		Short: "Node Management Service",
+		Use:   "oxide-controller",
+		Short: "Oxide Kubernetes Management Service",
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 			switch verbose {
 			case 0:
