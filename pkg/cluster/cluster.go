@@ -55,6 +55,8 @@ func (c *Cluster) ensureClusterExists(ctx context.Context, timeoutMinutes int) (
 	cpuCount := c.controlPlaneCPUCount
 	secretName := c.secretName
 
+	c.logger.Debugf("Checking if %d control plane nodes exist with prefix %s", controlPlaneCount, controlPlanePrefix)
+
 	// TODO: endpoint is paginated, using arbitrary limit for now.
 	instances, err := client.InstanceList(ctx, oxide.InstanceListParams{
 		Project: oxide.NameOrId(projectID),
@@ -183,8 +185,11 @@ func (c *Cluster) ensureClusterExists(ctx context.Context, timeoutMinutes int) (
 			return nil, fmt.Errorf("failed to run command to retrieve kubeconfig on control plane node: %w", err)
 		}
 
+		c.logger.Debugf("retrieved new kubeconfig of size %d", len(kubeconfig))
+
 		// save the join token, system ssh key pair, user ssh key to the Kubernetes secret
-		if err := saveSecret(secretName, kubeconfig, secrets); err != nil {
+		c.logger.Debugf("Saving secret %s to Kubernetes", secretName)
+		if err := saveSecret(ctx, c.logger, secretName, kubeconfig, secrets); err != nil {
 			return nil, fmt.Errorf("failed to save secret: %w", err)
 		}
 
@@ -192,16 +197,20 @@ func (c *Cluster) ensureClusterExists(ctx context.Context, timeoutMinutes int) (
 	}
 
 	// now that we have an initial node, we can get the join token
-	joinToken, err := GetJoinToken(ctx, kubeconfig, secretName)
+	c.logger.Debugf("Getting join token from secret %s using kubeconfig size %d", secretName, len(kubeconfig))
+	joinToken, err := GetJoinToken(ctx, c.logger, kubeconfig, secretName)
 	if err != nil {
 		return nil, fmt.Errorf("failed to retrieve join token: %v", err)
 	}
 	// the number we want is the next one
 	highest++
 	count := controlPlaneCount - len(controlPlaneNodes)
+	c.logger.Debugf("control plane nodes %d, desired %d, creating %d", len(controlPlaneNodes), controlPlaneCount, count)
+
 	if _, err := c.createControlPlaneNodes(ctx, false, count, highest, controlPlaneIP.Ip, joinToken, []string{string(c.userPubkey)}, controlPlanePrefix, controlPlaneImage.Name, memoryGB, cpuCount); err != nil {
 		return nil, fmt.Errorf("failed to create control plane node: %w", err)
 	}
 
+	c.logger.Debugf("Completed %d control plane nodes exist with prefix %s", controlPlaneCount, controlPlanePrefix)
 	return kubeconfig, nil
 }

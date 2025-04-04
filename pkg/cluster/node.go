@@ -68,6 +68,7 @@ runcmd:
 // createControlPlaneNodes creates new control plane nodes
 func (c *Cluster) createControlPlaneNodes(ctx context.Context, initCluster bool, count, start int, controlPlaneIP string, joinToken string, pubkey []string, prefix string, image string, memoryGB, cpuCount int) ([]oxide.Instance, error) {
 	var controlPlaneNodes []oxide.Instance
+	c.logger.Debugf("Creating %d control plane nodes with prefix %s", count, prefix)
 	cloudConfig, err := GenerateCloudConfig("server", initCluster, controlPlaneIP, joinToken, pubkey)
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate cloud config: %w", err)
@@ -79,5 +80,6 @@ func (c *Cluster) createControlPlaneNodes(ctx context.Context, initCluster bool,
 		}
 		controlPlaneNodes = append(controlPlaneNodes, *instance)
 	}
+	c.logger.Debugf("Created %d control plane nodes with prefix %s", count, prefix)
 	return controlPlaneNodes, nil
 }

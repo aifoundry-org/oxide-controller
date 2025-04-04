@@ -6,11 +6,13 @@ import (
 	"strings"
 
 	"github.com/oxidecomputer/oxide.go/oxide"
+	log "github.com/sirupsen/logrus"
 )
 
-func GetControlPlaneIP(ctx context.Context, client *oxide.Client, projectID, controlPlanePrefix string) (*oxide.FloatingIp, error) {
+func GetControlPlaneIP(ctx context.Context, logger *log.Logger, client *oxide.Client, projectID, controlPlanePrefix string) (*oxide.FloatingIp, error) {
 	var controlPlaneIP *oxide.FloatingIp
 	// TODO: Do we need pagination? Using arbitrary limit for now.
+	logger.Debugf("Listing floating IPs for project %s", projectID)
 	fips, err := client.FloatingIpList(ctx, oxide.FloatingIpListParams{
 		Project: oxide.NameOrId(projectID),
 		Limit:   oxide.NewPointer(32),
@@ -18,9 +20,12 @@ func GetControlPlaneIP(ctx context.Context, client *oxide.Client, projectID, con
 	if err != nil {
 		return nil, fmt.Errorf("failed to list floating IPs: %w", err)
 	}
+	logger.Debugf("Found %d floating IPs", len(fips.Items))
 	for _, fip := range fips.Items {
+		logger.Tracef("trying FIP %s", fip.Name)
 		if strings.HasPrefix(string(fip.Name), controlPlanePrefix) {
 			controlPlaneIP = &fip
+			logger.Debugf("Found control plane floating IP: %s", controlPlaneIP)
 			break
 		}
 	}
@@ -30,7 +35,8 @@ func GetControlPlaneIP(ctx context.Context, client *oxide.Client, projectID, con
 
 func (c *Cluster) ensureControlPlaneIP(ctx context.Context, controlPlanePrefix string) (*oxide.FloatingIp, error) {
 	var controlPlaneIP *oxide.FloatingIp
-	controlPlaneIP, err := GetControlPlaneIP(ctx, c.client, c.projectID, controlPlanePrefix)
+	c.logger.Debugf("getting control plane IP for prefix %s", controlPlanePrefix)
+	controlPlaneIP, err := GetControlPlaneIP(ctx, c.logger, c.client, c.projectID, controlPlanePrefix)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get control plane IP: %w", err)
 	}

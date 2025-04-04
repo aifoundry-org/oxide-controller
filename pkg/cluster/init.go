@@ -16,7 +16,7 @@ func (c *Cluster) Initialize(ctx context.Context, timeoutMinutes int) (newKubeco
 		c.logger.Infof("Using project ID: %s", c.projectID)
 	}
 
-	if _, err := ensureImagesExist(ctx, c.client, c.projectID, c.controlPlaneImage, c.workerImage); err != nil {
+	if _, err := ensureImagesExist(ctx, c.logger, c.client, c.projectID, c.controlPlaneImage, c.workerImage); err != nil {
 		return nil, fmt.Errorf("image verification failed: %v", err)
 	}
 

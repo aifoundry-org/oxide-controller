@@ -6,14 +6,16 @@ import (
 	"fmt"
 	"strings"
 
+	log "github.com/sirupsen/logrus"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 // getSecretValue retrieves a specific value from the secret
-func getSecretValue(ctx context.Context, kubeconfig []byte, secret, key string) ([]byte, error) {
-	secretData, err := getSecret(ctx, kubeconfig, secret)
+func getSecretValue(ctx context.Context, logger *log.Logger, kubeconfig []byte, secret, key string) ([]byte, error) {
+	logger.Debugf("Getting secret value for key '%s' from secret '%s'", key, secret)
+	secretData, err := getSecret(ctx, logger, kubeconfig, secret)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get secret: %w", err)
 	}
@@ -29,8 +31,8 @@ func getSecretValue(ctx context.Context, kubeconfig []byte, secret, key string) 
 }
 
 // GetJoinToken retrieves a new k3s worker join token from the Kubernetes cluster
-func GetJoinToken(ctx context.Context, kubeconfig []byte, secret string) (string, error) {
-	value, err := getSecretValue(ctx, kubeconfig, secret, secretKeyJoinToken)
+func GetJoinToken(ctx context.Context, logger *log.Logger, kubeconfig []byte, secret string) (string, error) {
+	value, err := getSecretValue(ctx, logger, kubeconfig, secret, secretKeyJoinToken)
 	if err != nil {
 		return "", fmt.Errorf("failed to get join token: %w", err)
 	}
@@ -39,8 +41,8 @@ func GetJoinToken(ctx context.Context, kubeconfig []byte, secret string) (string
 }
 
 // GetUserSSHPublicKey retrieves the SSH public key from the Kubernetes cluster
-func GetUserSSHPublicKey(ctx context.Context, kubeconfig []byte, secret string) ([]byte, error) {
-	pubkey, err := getSecretValue(ctx, kubeconfig, secret, secretKeyUserSSH)
+func GetUserSSHPublicKey(ctx context.Context, logger *log.Logger, kubeconfig []byte, secret string) ([]byte, error) {
+	pubkey, err := getSecretValue(ctx, logger, kubeconfig, secret, secretKeyUserSSH)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get user SSH public key: %w", err)
 	}
@@ -48,7 +50,8 @@ func GetUserSSHPublicKey(ctx context.Context, kubeconfig []byte, secret string) 
 }
 
 // getSecret gets the secret with all of our important information
-func getSecret(ctx context.Context, kubeconfigRaw []byte, secret string) (map[string][]byte, error) {
+func getSecret(ctx context.Context, logger *log.Logger, kubeconfigRaw []byte, secret string) (map[string][]byte, error) {
+	logger.Debugf("Getting secret %s with kubeconfig size %d", secret, len(kubeconfigRaw))
 	parts := strings.SplitN(secret, "/", 2)
 	if len(parts) != 2 {
 		return nil, fmt.Errorf("invalid secret format %s, expected <namespace>/<name>", secret)
@@ -70,7 +73,8 @@ func getSecret(ctx context.Context, kubeconfigRaw []byte, secret string) (map[st
 }
 
 // saveSecret save a secret to the Kubernetes cluster
-func saveSecret(secretRef string, kubeconfig []byte, data map[string][]byte) error {
+func saveSecret(ctx context.Context, logger *log.Logger, secretRef string, kubeconfig []byte, data map[string][]byte) error {
+	logger.Debugf("Saving secret %s with kubeconfig size %d and keymap size %d", secretRef, len(kubeconfig), len(data))
 	// Parse namespace and name from <namespace>/<name>
 	parts := strings.SplitN(secretRef, "/", 2)
 	if len(parts) != 2 {

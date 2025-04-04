@@ -9,20 +9,23 @@ import (
 
 	"github.com/aifoundry-org/oxide-controller/pkg/util"
 	"github.com/oxidecomputer/oxide.go/oxide"
+	log "github.com/sirupsen/logrus"
 )
 
 // ensureImagesExist checks if the right images exist and creates them if needed
 // they can exist at the silo or project level. However, if they do not exist, then they
 // will be created at the project level.
 // This is not a member function of Cluster, as it can be self-contained and therefore tested.
-func ensureImagesExist(ctx context.Context, client *oxide.Client, projectID string, images ...Image) ([]string, error) {
+func ensureImagesExist(ctx context.Context, logger *log.Logger, client *oxide.Client, projectID string, images ...Image) ([]string, error) {
 	// TODO: We don't need to list images, we can `View` them by name -
 	//       `images` array is never long, few more requests shouldn't harm.
 	// TODO: Do we need pagination? Using arbitrary limit for now.
+	logger.Debugf("Listing images for project %s", projectID)
 	existing, err := client.ImageList(ctx, oxide.ImageListParams{Project: oxide.NameOrId(projectID), Limit: oxide.NewPointer(32)})
 	if err != nil {
 		return nil, fmt.Errorf("failed to list images: %w", err)
 	}
+	logger.Debugf("total images %d", len(existing.Items))
 	var (
 		missingImages []Image
 		imageMap      = make(map[string]string)
@@ -33,6 +36,7 @@ func ensureImagesExist(ctx context.Context, client *oxide.Client, projectID stri
 	}
 	for _, image := range images {
 		if _, ok := imageMap[image.Name]; !ok {
+			logger.Infof("Image %+v not found, adding to list", image)
 			missingImages = append(missingImages, image)
 		} else {
 			idMap[image.Name] = imageMap[image.Name]
