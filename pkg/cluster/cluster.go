@@ -14,7 +14,7 @@ import (
 )
 
 type Cluster struct {
-	logger                                     *log.Logger
+	logger                                     *log.Entry
 	client                                     *oxide.Client
 	projectID                                  string
 	prefix                                     string
@@ -26,9 +26,9 @@ type Cluster struct {
 }
 
 // New creates a new Cluster instance
-func New(logger *log.Logger, client *oxide.Client, projectID string, prefix string, controlPlaneCount int, controlPlaneImage, workerImage Image, controlPlaneMemoryGB, controlPlaneCPUCount int, secretName string, kubeconfig, pubkey []byte) *Cluster {
+func New(logger *log.Entry, client *oxide.Client, projectID string, prefix string, controlPlaneCount int, controlPlaneImage, workerImage Image, controlPlaneMemoryGB, controlPlaneCPUCount int, secretName string, kubeconfig, pubkey []byte) *Cluster {
 	return &Cluster{
-		logger:               logger,
+		logger:               logger.WithField("component", "cluster"),
 		client:               client,
 		projectID:            projectID,
 		prefix:               prefix,

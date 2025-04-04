@@ -9,7 +9,7 @@ import (
 )
 
 // ensureProjectExists checks if the right project exists and returns its ID
-func ensureProjectExists(ctx context.Context, logger *log.Logger, client *oxide.Client, projectName string) (string, error) {
+func ensureProjectExists(ctx context.Context, logger *log.Entry, client *oxide.Client, projectName string) (string, error) {
 	// TODO: We don't need to list Projects to find specific one, we can `View`
 	//       it by name.
 	// TODO: do we need pagination? Using arbitrary limit for now.

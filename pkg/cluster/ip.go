@@ -9,7 +9,7 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-func GetControlPlaneIP(ctx context.Context, logger *log.Logger, client *oxide.Client, projectID, controlPlanePrefix string) (*oxide.FloatingIp, error) {
+func GetControlPlaneIP(ctx context.Context, logger *log.Entry, client *oxide.Client, projectID, controlPlanePrefix string) (*oxide.FloatingIp, error) {
 	var controlPlaneIP *oxide.FloatingIp
 	// TODO: Do we need pagination? Using arbitrary limit for now.
 	logger.Debugf("Listing floating IPs for project %s", projectID)

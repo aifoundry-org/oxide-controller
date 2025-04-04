@@ -53,23 +53,24 @@ func rootCmd() (*cobra.Command, error) {
 			return nil
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			logger.Infof("Starting Node Management Service...")
+			logentry := logger.WithField("service", "oxide-controller")
+			logentry.Infof("Starting Node Management Service...")
 
 			// load the ssh key provided, if any
 			// loadSSHKey returns empty key material and no error if the userSSHPublicKey is empty
-			logger.Debugf("Loading SSH key from %s", userSSHPublicKey)
+			logentry.Debugf("Loading SSH key from %s", userSSHPublicKey)
 			pubkey, err := util.LoadFile(userSSHPublicKey)
 			if err != nil {
 				return fmt.Errorf("failed to load ssh public key at %s: %w", userSSHPublicKey, err)
 			}
 
-			logger.Debugf("Loading kubeconfig from %s", kubeconfigPath)
+			logentry.Debugf("Loading kubeconfig from %s", kubeconfigPath)
 			kubeconfig, err := util.LoadFile(kubeconfigPath)
 			if err != nil {
 				return fmt.Errorf("failed to load kubeconfig at %s: %w", kubeconfigPath, err)
 			}
 
-			logger.Debugf("Loading Oxide token from %s", tokenFilePath)
+			logentry.Debugf("Loading Oxide token from %s", tokenFilePath)
 			oxideToken, err := util.LoadFile(tokenFilePath)
 			if err != nil {
 				return fmt.Errorf("failed to load oxide token at %s: %w", tokenFilePath, err)
@@ -79,7 +80,7 @@ func rootCmd() (*cobra.Command, error) {
 				Host:  oxideAPIURL,
 				Token: string(oxideToken),
 			}
-			logger.Debugf("Creating Oxide API client with config: %+v", cfg)
+			logentry.Debugf("Creating Oxide API client with config: %+v", cfg)
 			oxideClient, err := oxide.NewClient(&cfg)
 			if err != nil {
 				return fmt.Errorf("failed to create Oxide API client: %v", err)
@@ -87,28 +88,28 @@ func rootCmd() (*cobra.Command, error) {
 
 			ctx := context.Background()
 
-			c := cluster.New(logger, oxideClient, clusterProject,
+			c := cluster.New(logentry, oxideClient, clusterProject,
 				controlPlanePrefix, controlPlaneCount,
 				cluster.Image{Name: controlPlaneImageName, Source: controlPlaneImageSource},
 				cluster.Image{Name: workerImageName, Source: workerImageSource},
 				int(controlPlaneMemory), int(controlPlaneCPU),
 				controlPlaneSecret, kubeconfig, pubkey,
 			)
-			logger.Debugf("Ensuring project exists: %s", clusterProject)
+			logentry.Debugf("Ensuring project exists: %s", clusterProject)
 			newKubeconfig, err := c.Initialize(ctx, clusterInitWait)
 			if err != nil {
 				return fmt.Errorf("failed to initialize setup: %v", err)
 			}
 			if len(kubeconfig) == 0 && len(newKubeconfig) > 0 {
-				logger.Infof("Saving new kubeconfig to %s", kubeconfigPath)
+				logentry.Infof("Saving new kubeconfig to %s", kubeconfigPath)
 				if err := util.SaveFileIfNotExists(kubeconfigPath, newKubeconfig); err != nil {
 					return fmt.Errorf("failed to save kubeconfig: %w", err)
 				}
 			}
 
 			// serve REST endpoints
-			logger.Infof("Starting server on address %s", address)
-			s := server.New(address, logger, oxideClient, controlPlaneSecret, clusterProject, controlPlanePrefix, workerImageName, int(workerMemory), int(workerCPU))
+			logentry.Infof("Starting server on address %s", address)
+			s := server.New(address, logentry, oxideClient, controlPlaneSecret, clusterProject, controlPlanePrefix, workerImageName, int(workerMemory), int(workerCPU))
 			return s.Serve()
 		},
 	}

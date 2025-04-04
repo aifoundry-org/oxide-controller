@@ -12,7 +12,7 @@ import (
 )
 
 type Server struct {
-	logger         *log.Logger
+	logger         *log.Entry
 	address        string
 	oxideClient    *oxide.Client
 	secretName     string
@@ -23,9 +23,9 @@ type Server struct {
 	workerCPUCount int
 }
 
-func New(address string, logger *log.Logger, oxideClient *oxide.Client, secretName, projectID, prefix, workerImage string, workerMemoryGB, workerCPUCount int) *Server {
+func New(address string, logger *log.Entry, oxideClient *oxide.Client, secretName, projectID, prefix, workerImage string, workerMemoryGB, workerCPUCount int) *Server {
 	return &Server{
-		logger:         logger,
+		logger:         logger.WithField("component", "server"),
 		address:        address,
 		oxideClient:    oxideClient,
 		secretName:     secretName,
