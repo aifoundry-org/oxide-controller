@@ -35,15 +35,15 @@ func ensureImagesExist(ctx context.Context, logger *log.Entry, client *oxide.Cli
 	for _, image := range existing.Items {
 		imageMap[string(image.Name)] = &image
 	}
-	for _, image := range images {
-		if _, ok := imageMap[image.Name]; !ok {
-			logger.Infof("Image %+v not found, adding to list", image)
-			missingImages = append(missingImages, image)
+	for i := range images {
+		if _, ok := imageMap[images[i].Name]; !ok {
+			logger.Infof("Image %+v not found, adding to list", images[i])
+			missingImages = append(missingImages, images[i])
 		} else {
-			name := image.Name
+			name := images[i].Name
 			idMap[name] = imageMap[name]
-			image.ID = imageMap[name].Id
-			image.Size = int(imageMap[name].Size)
+			images[i].ID = imageMap[name].Id
+			images[i].Size = int(imageMap[name].Size)
 		}
 	}
 
@@ -175,12 +175,12 @@ func ensureImagesExist(ctx context.Context, logger *log.Entry, client *oxide.Cli
 	}
 
 	// go through all of the image names and save their IDs
-	for _, image := range images {
-		if oxImage, ok := imageMap[image.Name]; !ok {
-			return nil, fmt.Errorf("image '%s' does not exist", image.Name)
+	for i := range images {
+		if oxImage, ok := imageMap[images[i].Name]; !ok {
+			return nil, fmt.Errorf("image '%s' does not exist", images[i].Name)
 		} else {
-			image.ID = oxImage.Id
-			image.Size = int(oxImage.Size)
+			images[i].ID = oxImage.Id
+			images[i].Size = int(oxImage.Size)
 		}
 	}
 	return images, nil
