@@ -66,18 +66,20 @@ runcmd:
 }
 
 // createControlPlaneNodes creates new control plane nodes
-func createControlPlaneNodes(ctx context.Context, initCluster bool, count, start int, controlPlaneIP string, client *oxide.Client, projectID, joinToken string, pubkey []string, prefix string, image string, memoryGB, cpuCount int) ([]oxide.Instance, error) {
+func (c *Cluster) createControlPlaneNodes(ctx context.Context, initCluster bool, count, start int, controlPlaneIP string, joinToken string, pubkey []string, prefix string, image string, memoryGB, cpuCount int) ([]oxide.Instance, error) {
 	var controlPlaneNodes []oxide.Instance
+	c.logger.Debugf("Creating %d control plane nodes with prefix %s", count, prefix)
 	cloudConfig, err := GenerateCloudConfig("server", initCluster, controlPlaneIP, joinToken, pubkey)
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate cloud config: %w", err)
 	}
 	for i := start; i < count; i++ {
-		instance, err := CreateInstance(ctx, client, projectID, fmt.Sprintf("%s%d", prefix, i), image, memoryGB, cpuCount, cloudConfig)
+		instance, err := CreateInstance(ctx, c.client, c.projectID, fmt.Sprintf("%s%d", prefix, i), image, memoryGB, cpuCount, cloudConfig)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create control plane node: %w", err)
 		}
 		controlPlaneNodes = append(controlPlaneNodes, *instance)
 	}
+	c.logger.Debugf("Created %d control plane nodes with prefix %s", count, prefix)
 	return controlPlaneNodes, nil
 }

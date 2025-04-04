@@ -3,17 +3,60 @@ package cluster
 import (
 	"context"
 	"fmt"
-	"log"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/aifoundry-org/oxide-controller/pkg/util"
+
 	"github.com/oxidecomputer/oxide.go/oxide"
+	log "github.com/sirupsen/logrus"
 )
 
+type Cluster struct {
+	logger                                     *log.Entry
+	client                                     *oxide.Client
+	projectID                                  string
+	prefix                                     string
+	controlPlaneCount                          int
+	controlPlaneImage, workerImage             Image
+	controlPlaneMemoryGB, controlPlaneCPUCount int
+	secretName                                 string
+	kubeconfig, userPubkey                     []byte
+}
+
+// New creates a new Cluster instance
+func New(logger *log.Entry, client *oxide.Client, projectID string, prefix string, controlPlaneCount int, controlPlaneImage, workerImage Image, controlPlaneMemoryGB, controlPlaneCPUCount int, secretName string, kubeconfig, pubkey []byte) *Cluster {
+	return &Cluster{
+		logger:               logger.WithField("component", "cluster"),
+		client:               client,
+		projectID:            projectID,
+		prefix:               prefix,
+		controlPlaneCount:    controlPlaneCount,
+		controlPlaneImage:    controlPlaneImage,
+		workerImage:          workerImage,
+		controlPlaneMemoryGB: controlPlaneMemoryGB,
+		controlPlaneCPUCount: controlPlaneCPUCount,
+		secretName:           secretName,
+		kubeconfig:           kubeconfig,
+		userPubkey:           pubkey,
+	}
+}
+
 // ensureClusterExists checks if a k3s cluster exists, and creates one if needed
-func ensureClusterExists(ctx context.Context, client *oxide.Client, projectID string, kubeconfig, userPubKey []byte, controlPlanePrefix string, controlPlaneCount int, controlPlaneImage string, memoryGB, cpuCount int, timeoutMinutes int, secretName string) (newKubeconfig []byte, err error) {
+func (c *Cluster) ensureClusterExists(ctx context.Context, timeoutMinutes int) (newKubeconfig []byte, err error) {
+	// local vars just for convenience
+	client := c.client
+	projectID := c.projectID
+	controlPlanePrefix := c.prefix
+	controlPlaneCount := c.controlPlaneCount
+	controlPlaneImage := c.controlPlaneImage
+	memoryGB := c.controlPlaneMemoryGB
+	cpuCount := c.controlPlaneCPUCount
+	secretName := c.secretName
+
+	c.logger.Debugf("Checking if %d control plane nodes exist with prefix %s", controlPlaneCount, controlPlanePrefix)
+
 	// TODO: endpoint is paginated, using arbitrary limit for now.
 	instances, err := client.InstanceList(ctx, oxide.InstanceListParams{
 		Project: oxide.NameOrId(projectID),
@@ -35,7 +78,7 @@ func ensureClusterExists(ctx context.Context, client *oxide.Client, projectID st
 		return nil, nil
 	}
 
-	controlPlaneIP, err := ensureControlPlaneIP(ctx, client, projectID, controlPlanePrefix)
+	controlPlaneIP, err := c.ensureControlPlaneIP(ctx, controlPlanePrefix)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get control plane IP: %w", err)
 	}
@@ -56,9 +99,10 @@ func ensureClusterExists(ctx context.Context, client *oxide.Client, projectID st
 		}
 	}
 
+	var kubeconfig = c.kubeconfig
 	// if we did not have any nodes, create a cluster
 	if len(controlPlaneNodes) == 0 {
-		if len(kubeconfig) > 0 {
+		if len(c.kubeconfig) > 0 {
 			return nil, fmt.Errorf("kubeconfig already exists but cluster does not")
 		}
 		highest++
@@ -68,12 +112,12 @@ func ensureClusterExists(ctx context.Context, client *oxide.Client, projectID st
 			return nil, fmt.Errorf("failed to generate SSH key pair: %w", err)
 		}
 		var pubkeyList []string
-		if userPubKey != nil {
-			pubkeyList = append(pubkeyList, string(userPubKey))
+		if c.userPubkey != nil {
+			pubkeyList = append(pubkeyList, string(c.userPubkey))
 		}
 		pubkeyList = append(pubkeyList, string(pub))
 		// add the public key to the node in addition to the user one
-		instances, err := createControlPlaneNodes(ctx, true, 1, highest, controlPlaneIP.Ip, client, projectID, "", pubkeyList, controlPlanePrefix, controlPlaneImage, memoryGB, cpuCount)
+		instances, err := c.createControlPlaneNodes(ctx, true, 1, highest, controlPlaneIP.Ip, "", pubkeyList, controlPlanePrefix, controlPlaneImage.Name, memoryGB, cpuCount)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create control plane node: %w", err)
 		}
@@ -95,16 +139,16 @@ func ensureClusterExists(ctx context.Context, client *oxide.Client, projectID st
 		// wait for the control plane node to be up and running
 		timeLeft := time.Duration(timeoutMinutes) * time.Minute
 		for {
-			log.Printf("Waiting %d mins for control plane node %s to be up and running...", timeLeft, controlPlaneIP)
+			c.logger.Infof("Waiting %d mins for control plane node %s to be up and running...", timeLeft, controlPlaneIP)
 			sleepTime := 1 * time.Minute
 			time.Sleep(sleepTime)
 			timeLeft -= sleepTime
 			if isClusterAlive(fmt.Sprintf("https://%s:%d", externalIP, 6443)) {
-				log.Printf("Control plane at %s is up and running", externalIP)
+				c.logger.Infof("Control plane at %s is up and running", externalIP)
 				break
 			}
 			if timeLeft <= 0 {
-				log.Printf("Control plane at %s did not respond in time, exiting", externalIP)
+				c.logger.Errorf("Control plane at %s did not respond in time, exiting", externalIP)
 				return nil, fmt.Errorf("control plane at %s did not respond in time", externalIP)
 			}
 		}
@@ -131,8 +175,8 @@ func ensureClusterExists(ctx context.Context, client *oxide.Client, projectID st
 		secrets[secretKeyJoinToken] = joinToken
 
 		// save the user ssh public key to the secrets map
-		if userPubKey != nil {
-			secrets[secretKeyUserSSH] = userPubKey
+		if c.userPubkey != nil {
+			secrets[secretKeyUserSSH] = c.userPubkey
 		}
 
 		// get the kubeconfig
@@ -141,8 +185,11 @@ func ensureClusterExists(ctx context.Context, client *oxide.Client, projectID st
 			return nil, fmt.Errorf("failed to run command to retrieve kubeconfig on control plane node: %w", err)
 		}
 
+		c.logger.Debugf("retrieved new kubeconfig of size %d", len(kubeconfig))
+
 		// save the join token, system ssh key pair, user ssh key to the Kubernetes secret
-		if err := saveSecret(secretName, kubeconfig, secrets); err != nil {
+		c.logger.Debugf("Saving secret %s to Kubernetes", secretName)
+		if err := saveSecret(ctx, c.logger, secretName, kubeconfig, secrets); err != nil {
 			return nil, fmt.Errorf("failed to save secret: %w", err)
 		}
 
@@ -150,16 +197,20 @@ func ensureClusterExists(ctx context.Context, client *oxide.Client, projectID st
 	}
 
 	// now that we have an initial node, we can get the join token
-	joinToken, err := GetJoinToken(ctx, kubeconfig, secretName)
+	c.logger.Debugf("Getting join token from secret %s using kubeconfig size %d", secretName, len(kubeconfig))
+	joinToken, err := GetJoinToken(ctx, c.logger, kubeconfig, secretName)
 	if err != nil {
 		return nil, fmt.Errorf("failed to retrieve join token: %v", err)
 	}
 	// the number we want is the next one
 	highest++
 	count := controlPlaneCount - len(controlPlaneNodes)
-	if _, err := createControlPlaneNodes(ctx, false, count, highest, controlPlaneIP.Ip, client, projectID, joinToken, []string{string(userPubKey)}, controlPlanePrefix, controlPlaneImage, memoryGB, cpuCount); err != nil {
+	c.logger.Debugf("control plane nodes %d, desired %d, creating %d", len(controlPlaneNodes), controlPlaneCount, count)
+
+	if _, err := c.createControlPlaneNodes(ctx, false, count, highest, controlPlaneIP.Ip, joinToken, []string{string(c.userPubkey)}, controlPlanePrefix, controlPlaneImage.Name, memoryGB, cpuCount); err != nil {
 		return nil, fmt.Errorf("failed to create control plane node: %w", err)
 	}
 
+	c.logger.Debugf("Completed %d control plane nodes exist with prefix %s", controlPlaneCount, controlPlanePrefix)
 	return kubeconfig, nil
 }

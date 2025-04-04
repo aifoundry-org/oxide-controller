@@ -3,9 +3,9 @@ package cmd
 import (
 	"context"
 	"fmt"
-	"log"
 
 	"github.com/oxidecomputer/oxide.go/oxide"
+	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 
 	"github.com/aifoundry-org/oxide-controller/pkg/cluster"
@@ -32,26 +32,45 @@ func rootCmd() (*cobra.Command, error) {
 		userSSHPublicKey        string
 		kubeconfigPath          string
 		controlPlaneSecret      string
+		verbose                 int
+		address                 string
+
+		logger = log.New()
 	)
 
 	cmd := &cobra.Command{
-		Use:   "node-manager",
-		Short: "Node Management Service",
+		Use:   "oxide-controller",
+		Short: "Oxide Kubernetes Management Service",
+		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+			switch verbose {
+			case 0:
+				logger.SetLevel(log.InfoLevel)
+			case 1:
+				logger.SetLevel(log.DebugLevel)
+			case 2:
+				logger.SetLevel(log.TraceLevel)
+			}
+			return nil
+		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			log.Println("Starting Node Management Service...")
+			logentry := logger.WithField("service", "oxide-controller")
+			logentry.Infof("Starting Node Management Service...")
 
 			// load the ssh key provided, if any
 			// loadSSHKey returns empty key material and no error if the userSSHPublicKey is empty
+			logentry.Debugf("Loading SSH key from %s", userSSHPublicKey)
 			pubkey, err := util.LoadFile(userSSHPublicKey)
 			if err != nil {
 				return fmt.Errorf("failed to load ssh public key at %s: %w", userSSHPublicKey, err)
 			}
 
+			logentry.Debugf("Loading kubeconfig from %s", kubeconfigPath)
 			kubeconfig, err := util.LoadFile(kubeconfigPath)
 			if err != nil {
 				return fmt.Errorf("failed to load kubeconfig at %s: %w", kubeconfigPath, err)
 			}
 
+			logentry.Debugf("Loading Oxide token from %s", tokenFilePath)
 			oxideToken, err := util.LoadFile(tokenFilePath)
 			if err != nil {
 				return fmt.Errorf("failed to load oxide token at %s: %w", tokenFilePath, err)
@@ -61,32 +80,36 @@ func rootCmd() (*cobra.Command, error) {
 				Host:  oxideAPIURL,
 				Token: string(oxideToken),
 			}
+			logentry.Debugf("Creating Oxide API client with config: %+v", cfg)
 			oxideClient, err := oxide.NewClient(&cfg)
 			if err != nil {
 				return fmt.Errorf("failed to create Oxide API client: %v", err)
 			}
 
 			ctx := context.Background()
-			newKubeconfig, err := cluster.Initialize(ctx, kubeconfig, pubkey, oxideClient, clusterProject,
+
+			c := cluster.New(logentry, oxideClient, clusterProject,
 				controlPlanePrefix, controlPlaneCount,
 				cluster.Image{Name: controlPlaneImageName, Source: controlPlaneImageSource},
 				cluster.Image{Name: workerImageName, Source: workerImageSource},
 				int(controlPlaneMemory), int(controlPlaneCPU),
-				clusterInitWait,
-				controlPlaneSecret,
+				controlPlaneSecret, kubeconfig, pubkey,
 			)
+			logentry.Debugf("Ensuring project exists: %s", clusterProject)
+			newKubeconfig, err := c.Initialize(ctx, clusterInitWait)
 			if err != nil {
 				return fmt.Errorf("failed to initialize setup: %v", err)
 			}
 			if len(kubeconfig) == 0 && len(newKubeconfig) > 0 {
+				logentry.Infof("Saving new kubeconfig to %s", kubeconfigPath)
 				if err := util.SaveFileIfNotExists(kubeconfigPath, newKubeconfig); err != nil {
 					return fmt.Errorf("failed to save kubeconfig: %w", err)
 				}
-				kubeconfig = newKubeconfig
 			}
 
 			// serve REST endpoints
-			s := server.New(":8080", oxideClient, controlPlaneSecret, clusterProject, controlPlanePrefix, workerImageName, int(workerMemory), int(workerCPU))
+			logentry.Infof("Starting server on address %s", address)
+			s := server.New(address, logentry, oxideClient, controlPlaneSecret, clusterProject, controlPlanePrefix, workerImageName, int(workerMemory), int(workerCPU))
 			return s.Serve()
 		},
 	}
@@ -109,6 +132,8 @@ func rootCmd() (*cobra.Command, error) {
 	cmd.Flags().StringVar(&userSSHPublicKey, "user-ssh-public-key", "", "Path to public key to inject in all deployed cloud instances")
 	cmd.Flags().StringVar(&kubeconfigPath, "kubeconfig", "~/.kube/oxide-controller-config", "Path to save kubeconfig when generating new cluster, or to use for accessing existing cluster")
 	cmd.Flags().StringVar(&controlPlaneSecret, "control-plane-secret", "kube-system/oxide-controller-secret", "secret in Kubernetes cluster where the following are stored: join token, user ssh public key, controller ssh private/public keypair; should be as <namespace>/<name>")
+	cmd.Flags().IntVarP(&verbose, "verbose", "v", 0, "set log level, 0 is info, 1 is debug, 2 is trace")
+	cmd.Flags().StringVar(&address, "address", ":8080", "Address to bind the server to")
 
 	return cmd, nil
 }
