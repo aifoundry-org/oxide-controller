@@ -58,3 +58,14 @@ func (c *Cluster) ensureControlPlaneIP(ctx context.Context, controlPlanePrefix s
 	}
 	return controlPlaneIP, nil
 }
+
+func attachIP(floatingIp *oxide.FloatingIp) {
+	externalIps := []oxide.ExternalIpCreate{}
+	if floatingIp != nil {
+		externalIps = append(externalIps, oxide.ExternalIpCreate{
+			Type:       oxide.ExternalIpCreateTypeFloating,
+			FloatingIp: oxide.NameOrId(floatingIp.Id),
+		})
+	}
+
+}

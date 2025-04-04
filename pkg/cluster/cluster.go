@@ -14,32 +14,30 @@ import (
 )
 
 type Cluster struct {
-	logger                                     *log.Entry
-	client                                     *oxide.Client
-	projectID                                  string
-	prefix                                     string
-	controlPlaneCount                          int
-	controlPlaneImage, workerImage             Image
-	controlPlaneMemoryGB, controlPlaneCPUCount int
-	secretName                                 string
-	kubeconfig, userPubkey                     []byte
+	logger                       *log.Entry
+	client                       *oxide.Client
+	projectID                    string
+	prefix                       string
+	controlPlaneCount            int
+	controlPlaneSpec, workerSpec NodeSpec
+	secretName                   string
+	kubeconfig, userPubkey       []byte
+	controlPlaneIP               string
 }
 
 // New creates a new Cluster instance
-func New(logger *log.Entry, client *oxide.Client, projectID string, prefix string, controlPlaneCount int, controlPlaneImage, workerImage Image, controlPlaneMemoryGB, controlPlaneCPUCount int, secretName string, kubeconfig, pubkey []byte) *Cluster {
+func New(logger *log.Entry, client *oxide.Client, projectID string, prefix string, controlPlaneCount int, controlPlaneSpec, workerSpec NodeSpec, secretName string, kubeconfig, pubkey []byte) *Cluster {
 	return &Cluster{
-		logger:               logger.WithField("component", "cluster"),
-		client:               client,
-		projectID:            projectID,
-		prefix:               prefix,
-		controlPlaneCount:    controlPlaneCount,
-		controlPlaneImage:    controlPlaneImage,
-		workerImage:          workerImage,
-		controlPlaneMemoryGB: controlPlaneMemoryGB,
-		controlPlaneCPUCount: controlPlaneCPUCount,
-		secretName:           secretName,
-		kubeconfig:           kubeconfig,
-		userPubkey:           pubkey,
+		logger:            logger.WithField("component", "cluster"),
+		client:            client,
+		projectID:         projectID,
+		prefix:            prefix,
+		controlPlaneCount: controlPlaneCount,
+		controlPlaneSpec:  controlPlaneSpec,
+		workerSpec:        workerSpec,
+		secretName:        secretName,
+		kubeconfig:        kubeconfig,
+		userPubkey:        pubkey,
 	}
 }
 
@@ -50,9 +48,6 @@ func (c *Cluster) ensureClusterExists(ctx context.Context, timeoutMinutes int) (
 	projectID := c.projectID
 	controlPlanePrefix := c.prefix
 	controlPlaneCount := c.controlPlaneCount
-	controlPlaneImage := c.controlPlaneImage
-	memoryGB := c.controlPlaneMemoryGB
-	cpuCount := c.controlPlaneCPUCount
 	secretName := c.secretName
 
 	c.logger.Debugf("Checking if %d control plane nodes exist with prefix %s", controlPlaneCount, controlPlanePrefix)
@@ -81,6 +76,10 @@ func (c *Cluster) ensureClusterExists(ctx context.Context, timeoutMinutes int) (
 	controlPlaneIP, err := c.ensureControlPlaneIP(ctx, controlPlanePrefix)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get control plane IP: %w", err)
+	}
+
+	if c.controlPlaneIP == "" {
+		c.controlPlaneIP = controlPlaneIP.Ip
 	}
 
 	// find highest number control plane node
@@ -117,7 +116,7 @@ func (c *Cluster) ensureClusterExists(ctx context.Context, timeoutMinutes int) (
 		}
 		pubkeyList = append(pubkeyList, string(pub))
 		// add the public key to the node in addition to the user one
-		instances, err := c.createControlPlaneNodes(ctx, true, 1, highest, controlPlaneIP, "", pubkeyList, controlPlanePrefix, controlPlaneImage.Name, memoryGB, cpuCount)
+		instances, err := c.CreateControlPlaneNodes(ctx, true, 1, highest, pubkeyList)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create control plane node: %w", err)
 		}
@@ -195,18 +194,12 @@ func (c *Cluster) ensureClusterExists(ctx context.Context, timeoutMinutes int) (
 		controlPlaneNodes = append(controlPlaneNodes, instances[0])
 	}
 
-	// now that we have an initial node, we can get the join token
-	c.logger.Debugf("Getting join token from secret %s using kubeconfig size %d", secretName, len(kubeconfig))
-	joinToken, err := GetJoinToken(ctx, c.logger, kubeconfig, secretName)
-	if err != nil {
-		return nil, fmt.Errorf("failed to retrieve join token: %v", err)
-	}
 	// the number we want is the next one
 	highest++
 	count := controlPlaneCount - len(controlPlaneNodes)
 	c.logger.Debugf("control plane nodes %d, desired %d, creating %d", len(controlPlaneNodes), controlPlaneCount, count)
 
-	if _, err := c.createControlPlaneNodes(ctx, false, count, highest, nil, joinToken, []string{string(c.userPubkey)}, controlPlanePrefix, controlPlaneImage.Name, memoryGB, cpuCount); err != nil {
+	if _, err := c.CreateControlPlaneNodes(ctx, false, count, highest, nil); err != nil {
 		return nil, fmt.Errorf("failed to create control plane node: %w", err)
 	}
 

@@ -3,6 +3,8 @@ package cluster
 import (
 	"context"
 	"fmt"
+
+	"github.com/aifoundry-org/oxide-controller/pkg/util"
 )
 
 func (c *Cluster) Initialize(ctx context.Context, timeoutMinutes int) (newKubeconfig []byte, err error) {
@@ -16,9 +18,17 @@ func (c *Cluster) Initialize(ctx context.Context, timeoutMinutes int) (newKubeco
 		c.logger.Infof("Using project ID: %s", c.projectID)
 	}
 
-	if _, err := ensureImagesExist(ctx, c.logger, c.client, c.projectID, c.controlPlaneImage, c.workerImage); err != nil {
+	images, err := ensureImagesExist(ctx, c.logger, c.client, c.projectID, c.controlPlaneSpec.Image, c.workerSpec.Image)
+	if err != nil {
 		return nil, fmt.Errorf("image verification failed: %v", err)
 	}
+	if len(images) != 2 {
+		return nil, fmt.Errorf("expected 2 images, got %d", len(images))
+	}
+	c.controlPlaneSpec.Image = images[0]
+	c.controlPlaneSpec.DiskSize = util.RoundUp(images[0].Size, GB)
+	c.workerSpec.Image = images[1]
+	c.workerSpec.DiskSize = util.RoundUp(images[0].Size, GB)
 
 	return c.ensureClusterExists(ctx, timeoutMinutes)
 }
