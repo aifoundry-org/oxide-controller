@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	"github.com/oxidecomputer/oxide.go/oxide"
-	log "github.com/sirupsen/logrus"
 )
 
 func GetControlPlaneIP(ctx context.Context, client *oxide.Client, projectID, controlPlanePrefix string) (*oxide.FloatingIp, error) {
@@ -37,7 +36,7 @@ func (c *Cluster) ensureControlPlaneIP(ctx context.Context, controlPlanePrefix s
 	}
 	// what if we did not find one?
 	if controlPlaneIP == nil {
-		log.Printf("Control plane floating IP not found. Creating one...")
+		c.logger.Infof("Control plane floating IP not found. Creating one...")
 		fip, err := c.client.FloatingIpCreate(ctx, oxide.FloatingIpCreateParams{
 			Project: oxide.NameOrId(c.projectID),
 			Body: &oxide.FloatingIpCreate{
@@ -49,7 +48,7 @@ func (c *Cluster) ensureControlPlaneIP(ctx context.Context, controlPlanePrefix s
 			return nil, fmt.Errorf("failed to create floating IP: %w", err)
 		}
 		controlPlaneIP = fip
-		log.Printf("Created floating IP: %s", controlPlaneIP.Ip)
+		c.logger.Infof("Created floating IP: %s", controlPlaneIP.Ip)
 	}
 	return controlPlaneIP, nil
 }

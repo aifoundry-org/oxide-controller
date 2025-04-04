@@ -111,16 +111,16 @@ func (c *Cluster) ensureClusterExists(ctx context.Context, kubeconfig, userPubKe
 		// wait for the control plane node to be up and running
 		timeLeft := time.Duration(timeoutMinutes) * time.Minute
 		for {
-			log.Printf("Waiting %d mins for control plane node %s to be up and running...", timeLeft, controlPlaneIP)
+			c.logger.Infof("Waiting %d mins for control plane node %s to be up and running...", timeLeft, controlPlaneIP)
 			sleepTime := 1 * time.Minute
 			time.Sleep(sleepTime)
 			timeLeft -= sleepTime
 			if isClusterAlive(fmt.Sprintf("https://%s:%d", externalIP, 6443)) {
-				log.Printf("Control plane at %s is up and running", externalIP)
+				c.logger.Infof("Control plane at %s is up and running", externalIP)
 				break
 			}
 			if timeLeft <= 0 {
-				log.Printf("Control plane at %s did not respond in time, exiting", externalIP)
+				c.logger.Errorf("Control plane at %s did not respond in time, exiting", externalIP)
 				return nil, fmt.Errorf("control plane at %s did not respond in time", externalIP)
 			}
 		}

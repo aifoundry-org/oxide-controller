@@ -33,6 +33,7 @@ func rootCmd() (*cobra.Command, error) {
 		kubeconfigPath          string
 		controlPlaneSecret      string
 		verbose                 int
+		address                 string
 
 		logger = log.New()
 	)
@@ -52,20 +53,23 @@ func rootCmd() (*cobra.Command, error) {
 			return nil
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			log.Println("Starting Node Management Service...")
+			logger.Infof("Starting Node Management Service...")
 
 			// load the ssh key provided, if any
 			// loadSSHKey returns empty key material and no error if the userSSHPublicKey is empty
+			logger.Debugf("Loading SSH key from %s", userSSHPublicKey)
 			pubkey, err := util.LoadFile(userSSHPublicKey)
 			if err != nil {
 				return fmt.Errorf("failed to load ssh public key at %s: %w", userSSHPublicKey, err)
 			}
 
+			logger.Debugf("Loading kubeconfig from %s", kubeconfigPath)
 			kubeconfig, err := util.LoadFile(kubeconfigPath)
 			if err != nil {
 				return fmt.Errorf("failed to load kubeconfig at %s: %w", kubeconfigPath, err)
 			}
 
+			logger.Debugf("Loading Oxide token from %s", tokenFilePath)
 			oxideToken, err := util.LoadFile(tokenFilePath)
 			if err != nil {
 				return fmt.Errorf("failed to load oxide token at %s: %w", tokenFilePath, err)
@@ -75,6 +79,7 @@ func rootCmd() (*cobra.Command, error) {
 				Host:  oxideAPIURL,
 				Token: string(oxideToken),
 			}
+			logger.Debugf("Creating Oxide API client with config: %+v", cfg)
 			oxideClient, err := oxide.NewClient(&cfg)
 			if err != nil {
 				return fmt.Errorf("failed to create Oxide API client: %v", err)
@@ -83,6 +88,7 @@ func rootCmd() (*cobra.Command, error) {
 			ctx := context.Background()
 
 			c := cluster.New(logger, oxideClient, clusterProject)
+			logger.Debugf("Ensuring project exists: %s", clusterProject)
 			newKubeconfig, err := c.Initialize(ctx, kubeconfig, pubkey,
 				controlPlanePrefix, controlPlaneCount,
 				cluster.Image{Name: controlPlaneImageName, Source: controlPlaneImageSource},
@@ -95,13 +101,15 @@ func rootCmd() (*cobra.Command, error) {
 				return fmt.Errorf("failed to initialize setup: %v", err)
 			}
 			if len(kubeconfig) == 0 && len(newKubeconfig) > 0 {
+				logger.Infof("Saving new kubeconfig to %s", kubeconfigPath)
 				if err := util.SaveFileIfNotExists(kubeconfigPath, newKubeconfig); err != nil {
 					return fmt.Errorf("failed to save kubeconfig: %w", err)
 				}
 			}
 
 			// serve REST endpoints
-			s := server.New(":8080", logger, oxideClient, controlPlaneSecret, clusterProject, controlPlanePrefix, workerImageName, int(workerMemory), int(workerCPU))
+			logger.Infof("Starting server on address %s", address)
+			s := server.New(address, logger, oxideClient, controlPlaneSecret, clusterProject, controlPlanePrefix, workerImageName, int(workerMemory), int(workerCPU))
 			return s.Serve()
 		},
 	}
@@ -125,6 +133,7 @@ func rootCmd() (*cobra.Command, error) {
 	cmd.Flags().StringVar(&kubeconfigPath, "kubeconfig", "~/.kube/oxide-controller-config", "Path to save kubeconfig when generating new cluster, or to use for accessing existing cluster")
 	cmd.Flags().StringVar(&controlPlaneSecret, "control-plane-secret", "kube-system/oxide-controller-secret", "secret in Kubernetes cluster where the following are stored: join token, user ssh public key, controller ssh private/public keypair; should be as <namespace>/<name>")
 	cmd.Flags().IntVarP(&verbose, "verbose", "v", 0, "set log level, 0 is info, 1 is debug, 2 is trace")
+	cmd.Flags().StringVar(&address, "address", ":8080", "Address to bind the server to")
 
 	return cmd, nil
 }

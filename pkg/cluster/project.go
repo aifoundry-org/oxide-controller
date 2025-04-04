@@ -5,7 +5,6 @@ import (
 	"fmt"
 
 	"github.com/oxidecomputer/oxide.go/oxide"
-	log "github.com/sirupsen/logrus"
 )
 
 // ensureProjectExists checks if the right project exists and returns its ID
@@ -21,14 +20,14 @@ func (c *Cluster) ensureProjectExists(ctx context.Context) (string, error) {
 	var projectID string
 	for _, project := range projects.Items {
 		if string(project.Name) == c.projectID {
-			log.Printf("Cluster project '%s' exists.", c.projectID)
+			c.logger.Infof("Cluster project '%s' exists.", c.projectID)
 			projectID = project.Id
 			break
 		}
 	}
 
 	if projectID == "" {
-		log.Printf("Cluster project '%s' does not exist. Creating it...", c.projectID)
+		c.logger.Infof("Cluster project '%s' does not exist. Creating it...", c.projectID)
 		newProject, err := c.client.ProjectCreate(ctx, oxide.ProjectCreateParams{
 			Body: &oxide.ProjectCreate{Name: oxide.Name(c.projectID)},
 		})
@@ -36,7 +35,7 @@ func (c *Cluster) ensureProjectExists(ctx context.Context) (string, error) {
 			return "", fmt.Errorf("failed to create project: %w", err)
 		}
 		projectID = newProject.Id
-		log.Printf("Created project '%s' with ID '%s'", c.projectID, projectID)
+		c.logger.Infof("Created project '%s' with ID '%s'", c.projectID, projectID)
 	}
 	return projectID, nil
 }
