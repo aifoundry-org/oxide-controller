@@ -90,9 +90,8 @@ func rootCmd() (*cobra.Command, error) {
 
 			c := cluster.New(logentry, oxideClient, clusterProject,
 				controlPlanePrefix, controlPlaneCount,
-				cluster.Image{Name: controlPlaneImageName, Source: controlPlaneImageSource},
-				cluster.Image{Name: workerImageName, Source: workerImageSource},
-				int(controlPlaneMemory), int(controlPlaneCPU),
+				cluster.NodeSpec{Image: cluster.Image{Name: controlPlaneImageName, Source: controlPlaneImageSource}, MemoryGB: int(controlPlaneMemory), CPUCount: int(controlPlaneCPU)},
+				cluster.NodeSpec{Image: cluster.Image{Name: workerImageName, Source: workerImageSource}, MemoryGB: int(workerMemory), CPUCount: int(workerCPU)},
 				controlPlaneSecret, kubeconfig, pubkey,
 			)
 			logentry.Debugf("Ensuring project exists: %s", clusterProject)
@@ -109,7 +108,7 @@ func rootCmd() (*cobra.Command, error) {
 
 			// serve REST endpoints
 			logentry.Infof("Starting server on address %s", address)
-			s := server.New(address, logentry, oxideClient, controlPlaneSecret, clusterProject, controlPlanePrefix, workerImageName, int(workerMemory), int(workerCPU))
+			s := server.New(address, logentry, oxideClient, c, controlPlaneSecret, clusterProject, controlPlanePrefix, workerImageName, int(workerMemory), int(workerCPU))
 			return s.Serve()
 		},
 	}

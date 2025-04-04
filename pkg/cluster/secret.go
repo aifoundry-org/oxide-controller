@@ -31,8 +31,8 @@ func getSecretValue(ctx context.Context, logger *log.Entry, kubeconfig []byte, s
 }
 
 // GetJoinToken retrieves a new k3s worker join token from the Kubernetes cluster
-func GetJoinToken(ctx context.Context, logger *log.Entry, kubeconfig []byte, secret string) (string, error) {
-	value, err := getSecretValue(ctx, logger, kubeconfig, secret, secretKeyJoinToken)
+func (c *Cluster) GetJoinToken(ctx context.Context) (string, error) {
+	value, err := getSecretValue(ctx, c.logger, c.kubeconfig, c.secretName, secretKeyJoinToken)
 	if err != nil {
 		return "", fmt.Errorf("failed to get join token: %w", err)
 	}
@@ -41,8 +41,8 @@ func GetJoinToken(ctx context.Context, logger *log.Entry, kubeconfig []byte, sec
 }
 
 // GetUserSSHPublicKey retrieves the SSH public key from the Kubernetes cluster
-func GetUserSSHPublicKey(ctx context.Context, logger *log.Entry, kubeconfig []byte, secret string) ([]byte, error) {
-	pubkey, err := getSecretValue(ctx, logger, kubeconfig, secret, secretKeyUserSSH)
+func (c *Cluster) GetUserSSHPublicKey(ctx context.Context) ([]byte, error) {
+	pubkey, err := getSecretValue(ctx, c.logger, c.kubeconfig, c.secretName, secretKeyUserSSH)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get user SSH public key: %w", err)
 	}

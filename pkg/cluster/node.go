@@ -4,37 +4,35 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
+	"time"
 
 	"github.com/oxidecomputer/oxide.go/oxide"
 )
 
-func CreateInstance(ctx context.Context, client *oxide.Client, projectID, name, image string, memoryGB, cpuCount int, cloudConfig string, floatingIp *oxide.FloatingIp) (*oxide.Instance, error) {
-	externalIps := []oxide.ExternalIpCreate{}
-	if floatingIp != nil {
-		externalIps = append(externalIps, oxide.ExternalIpCreate{
-			Type:       oxide.ExternalIpCreateTypeFloating,
-			FloatingIp: oxide.NameOrId(floatingIp.Id),
-		})
-	}
+func CreateInstance(ctx context.Context, client *oxide.Client, projectID, instanceName string, spec NodeSpec, cloudConfig string) (*oxide.Instance, error) {
 	return client.InstanceCreate(ctx, oxide.InstanceCreateParams{
 		Project: oxide.NameOrId(projectID),
 		Body: &oxide.InstanceCreate{
-			Name:        oxide.Name(name),
-			Description: name,
-			Hostname:    oxide.Hostname(name),
-			Memory:      oxide.ByteCount(memoryGB * GB),
-			Ncpus:       oxide.InstanceCpuCount(cpuCount),
-			ExternalIps: externalIps,
+			Name:        oxide.Name(instanceName),
+			Description: instanceName,
+			Hostname:    oxide.Hostname(instanceName),
+			Memory:      oxide.ByteCount(spec.MemoryGB * GB),
+			Ncpus:       oxide.InstanceCpuCount(spec.CPUCount),
 			BootDisk: &oxide.InstanceDiskAttachment{
 				Type: "create",
 				DiskSource: oxide.DiskSource{
 					Type:      oxide.DiskSourceTypeImage,
-					ImageId:   image,
+					ImageId:   spec.Image.ID,
 					BlockSize: blockSize,
 				},
-				Size:        oxide.ByteCount(3 * GB), // FIXME, use explicit disk size
-				Name:        oxide.Name(name),
-				Description: name,
+				Size:        oxide.ByteCount(spec.DiskSize),
+				Name:        oxide.Name(instanceName),
+				Description: instanceName,
+			},
+			ExternalIps: []oxide.ExternalIpCreate{
+				{
+					Type: oxide.ExternalIpCreateTypeEphemeral,
+				},
 			},
 			NetworkInterfaces: oxide.InstanceNetworkInterfaceAttachment{
 				Type: "default",
@@ -85,20 +83,61 @@ runcmd:
 }
 
 // createControlPlaneNodes creates new control plane nodes
-func (c *Cluster) createControlPlaneNodes(ctx context.Context, initCluster bool, count, start int, controlPlaneIP *oxide.FloatingIp, joinToken string, pubkey []string, prefix string, image string, memoryGB, cpuCount int) ([]oxide.Instance, error) {
+func (c *Cluster) CreateControlPlaneNodes(ctx context.Context, initCluster bool, count, start int, additionalPubKeys []string) ([]oxide.Instance, error) {
 	var controlPlaneNodes []oxide.Instance
-	c.logger.Debugf("Creating %d control plane nodes with prefix %s", count, prefix)
-	cloudConfig, err := GenerateCloudConfig("server", initCluster, controlPlaneIP.Ip, joinToken, pubkey)
+	c.logger.Debugf("Creating %d control plane nodes with prefix %s", count, c.prefix)
+	joinToken, err := c.GetJoinToken(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get join token: %w", err)
+	}
+	pubkey, err := c.GetUserSSHPublicKey(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get user SSH public key: %w", err)
+	}
+	pubKeyList := []string{string(pubkey)}
+	if additionalPubKeys != nil {
+		pubKeyList = append(pubKeyList, additionalPubKeys...)
+	}
+	cloudConfig, err := GenerateCloudConfig("server", initCluster, c.controlPlaneIP, joinToken, pubKeyList)
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate cloud config: %w", err)
 	}
 	for i := start; i < count; i++ {
-		instance, err := CreateInstance(ctx, c.client, c.projectID, fmt.Sprintf("%s%d", prefix, i), image, memoryGB, cpuCount, cloudConfig, controlPlaneIP)
+		instance, err := CreateInstance(ctx, c.client, c.projectID, fmt.Sprintf("%s%d", c.prefix, i), c.controlPlaneSpec, cloudConfig)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create control plane node: %w", err)
 		}
 		controlPlaneNodes = append(controlPlaneNodes, *instance)
 	}
-	c.logger.Debugf("Created %d control plane nodes with prefix %s", count, prefix)
+	c.logger.Debugf("Created %d control plane nodes with prefix %s", count, c.prefix)
 	return controlPlaneNodes, nil
+}
+
+// CreateWorkerNodes creates new worker nodes
+func (c *Cluster) CreateWorkerNodes(ctx context.Context, count int) ([]oxide.Instance, error) {
+	var nodes []oxide.Instance
+	c.logger.Debugf("Creating %d worker nodes with prefix %s", count, c.prefix)
+	joinToken, err := c.GetJoinToken(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get join token: %w", err)
+	}
+	pubkey, err := c.GetUserSSHPublicKey(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get user SSH public key: %w", err)
+	}
+	cloudConfig, err := GenerateCloudConfig("agent", false, c.controlPlaneIP, joinToken, []string{string(pubkey)})
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate cloud config: %w", err)
+	}
+
+	for i := 0; i < count; i++ {
+		workerName := fmt.Sprintf("worker-%d", time.Now().Unix())
+		instance, err := CreateInstance(ctx, c.client, c.projectID, workerName, c.workerSpec, cloudConfig)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create worker node: %w", err)
+		}
+		nodes = append(nodes, *instance)
+	}
+	c.logger.Debugf("Created %d control plane nodes with prefix %s", count, c.prefix)
+	return nodes, nil
 }

@@ -15,8 +15,9 @@ import (
 // ensureImagesExist checks if the right images exist and creates them if needed
 // they can exist at the silo or project level. However, if they do not exist, then they
 // will be created at the project level.
+// The returned images will have their IDs set. It will have the exact same number of images as in the argument images.
 // This is not a member function of Cluster, as it can be self-contained and therefore tested.
-func ensureImagesExist(ctx context.Context, logger *log.Entry, client *oxide.Client, projectID string, images ...Image) ([]string, error) {
+func ensureImagesExist(ctx context.Context, logger *log.Entry, client *oxide.Client, projectID string, images ...Image) ([]Image, error) {
 	// TODO: We don't need to list images, we can `View` them by name -
 	//       `images` array is never long, few more requests shouldn't harm.
 	// TODO: Do we need pagination? Using arbitrary limit for now.
@@ -28,18 +29,21 @@ func ensureImagesExist(ctx context.Context, logger *log.Entry, client *oxide.Cli
 	logger.Debugf("total images %d", len(existing.Items))
 	var (
 		missingImages []Image
-		imageMap      = make(map[string]string)
-		idMap         = make(map[string]string)
+		imageMap      = make(map[string]*oxide.Image)
+		idMap         = make(map[string]*oxide.Image)
 	)
 	for _, image := range existing.Items {
-		imageMap[string(image.Name)] = image.Id
+		imageMap[string(image.Name)] = &image
 	}
 	for _, image := range images {
 		if _, ok := imageMap[image.Name]; !ok {
 			logger.Infof("Image %+v not found, adding to list", image)
 			missingImages = append(missingImages, image)
 		} else {
-			idMap[image.Name] = imageMap[image.Name]
+			name := image.Name
+			idMap[name] = imageMap[name]
+			image.ID = imageMap[name].Id
+			image.Size = int(imageMap[name].Size)
 		}
 	}
 
@@ -74,10 +78,7 @@ func ensureImagesExist(ctx context.Context, logger *log.Entry, client *oxide.Cli
 		if size == 0 {
 			return nil, fmt.Errorf("image file is empty")
 		}
-		// FIXME?: round to the nearest GB: not verified - the default debian image is *exactly* 3GB :)
-		//   https://github.com/oxidecomputer/oxide.rs/blob/17e3f58248832f977d366afdc69641551a62b1db/sdk/src/extras/disk.rs#L735
-		// round up to nearest block size
-		size = (size + blockSize) &^ blockSize
+		size = util.RoundUp(size, GB)
 		// create the disk
 		disk, err := client.DiskCreate(ctx, oxide.DiskCreateParams{
 			Project: oxide.NameOrId(projectID),
@@ -169,18 +170,18 @@ func ensureImagesExist(ctx context.Context, logger *log.Entry, client *oxide.Cli
 		if err != nil {
 			return nil, fmt.Errorf("failed to create image: %w", err)
 		}
-		imageMap[missingImage.Name] = image.Id
-		idMap[missingImage.Name] = image.Id
+		imageMap[missingImage.Name] = image
+		idMap[missingImage.Name] = image
 	}
 
-	// go through all of the image names and get their IDs
-	var ids []string
+	// go through all of the image names and save their IDs
 	for _, image := range images {
-		if id, ok := imageMap[image.Name]; !ok {
+		if oxImage, ok := imageMap[image.Name]; !ok {
 			return nil, fmt.Errorf("image '%s' does not exist", image.Name)
 		} else {
-			ids = append(ids, id)
+			image.ID = oxImage.Id
+			image.Size = int(oxImage.Size)
 		}
 	}
-	return ids, nil
+	return images, nil
 }
