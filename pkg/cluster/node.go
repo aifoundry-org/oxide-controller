@@ -2,6 +2,7 @@ package cluster
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
 
 	"github.com/oxidecomputer/oxide.go/oxide"
@@ -49,7 +50,7 @@ func GenerateCloudConfig(nodeType string, initCluster bool, controlPlaneIP, join
 	default:
 		return "", fmt.Errorf("Unknown node type: %s", nodeType)
 	}
-	return fmt.Sprintf(`
+	content := fmt.Sprintf(`
 #cloud-config
 users:
   - name: root
@@ -62,7 +63,8 @@ runcmd:
   - curl -sfL https://get.k3s.io | sh -s - %s %s %s %s %s %s
 `,
 		pubkey,
-		typeFlag, initFlag, sanFlag, tokenFlag, serverFlag, sanFlag), nil
+		typeFlag, initFlag, sanFlag, tokenFlag, serverFlag, sanFlag)
+	return base64.StdEncoding.EncodeToString([]byte(content)), nil
 }
 
 // createControlPlaneNodes creates new control plane nodes

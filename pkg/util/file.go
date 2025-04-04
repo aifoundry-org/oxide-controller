@@ -21,6 +21,29 @@ func LoadFile(p string) ([]byte, error) {
 	return data, nil
 }
 
+// LoadFileAllowMissing loads the contents from the specified path
+// and returns the key material as a byte slice.
+// If the path is empty, it returns an empty byte slice and no error.
+// If the file does not exist, it returns an empty byte slice and no error.
+// If the file does exist but cannot be read, it returns an error.
+func LoadFileAllowMissing(p string) ([]byte, error) {
+	if p == "" {
+		return nil, nil
+	}
+	_, err := os.Stat(p)
+	if err != nil && !os.IsNotExist(err) {
+		return nil, fmt.Errorf("failed to stat file: %w", err)
+	}
+	if err != nil && os.IsNotExist(err) {
+		return nil, nil
+	}
+	data, err := os.ReadFile(p)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read file: %w", err)
+	}
+	return data, nil
+}
+
 // DownloadFile downloads a file from a URL and saves it to the local filesystem
 // It should understand different file URL schemes, but for now, just knows https
 func DownloadFile(filepath, url string) error {
