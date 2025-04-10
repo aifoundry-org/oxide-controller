@@ -65,20 +65,26 @@ func GenerateCloudConfig(nodeType string, initCluster bool, controlPlaneIP, join
 	default:
 		return "", fmt.Errorf("Unknown node type: %s", nodeType)
 	}
+	var sshKeysSection string
+	if len(pubkey) > 0 {
+		sshKeysSection = "    ssh-authorized-keys:\n"
+		for _, key := range pubkey {
+			sshKeysSection += fmt.Sprintf("      - %s\n", key)
+		}
+	}
+
 	content := fmt.Sprintf(`
 #cloud-config
 users:
   - name: root
-    ssh-authorized-keys: [%s]
+%s  
     shell: /bin/bash
 ssh_pwauth: false  # disables password logins
 disable_root: false  # ensure root isn't disabled
 allow_public_ssh_keys: true
 runcmd:
   - curl -sfL https://get.k3s.io | sh -s - %s %s %s %s %s %s
-`,
-		pubkey,
-		typeFlag, initFlag, sanFlag, tokenFlag, serverFlag, sanFlag)
+`, sshKeysSection, typeFlag, initFlag, sanFlag, tokenFlag, serverFlag, sanFlag)
 	return base64.StdEncoding.EncodeToString([]byte(content)), nil
 }
 
