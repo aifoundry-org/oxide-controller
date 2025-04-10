@@ -2,7 +2,9 @@ package cmd
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/oxidecomputer/oxide.go/oxide"
@@ -32,6 +34,7 @@ func rootCmd() (*cobra.Command, error) {
 		clusterInitWait         int
 		userSSHPublicKey        string
 		kubeconfigPath          string
+		kubeconfigOverwrite     bool
 		controlPlaneSecret      string
 		verbose                 int
 		address                 string
@@ -59,16 +62,26 @@ func rootCmd() (*cobra.Command, error) {
 
 			// load the ssh key provided, if any
 			// loadSSHKey returns empty key material and no error if the userSSHPublicKey is empty
-			logentry.Debugf("Loading SSH key from %s", userSSHPublicKey)
-			pubkey, err := util.LoadFile(userSSHPublicKey)
-			if err != nil {
-				return fmt.Errorf("failed to load ssh public key at %s: %w", userSSHPublicKey, err)
+			var (
+				pubkey []byte
+				err    error
+			)
+			if userSSHPublicKey != "" {
+				logentry.Debugf("Loading SSH key from %s", userSSHPublicKey)
+				pubkey, err = util.LoadFile(userSSHPublicKey)
+				if err != nil {
+					return fmt.Errorf("failed to load ssh public key at %s: %w", userSSHPublicKey, err)
+				}
 			}
 
 			logentry.Debugf("Loading kubeconfig from %s", kubeconfigPath)
-			kubeconfig, err := util.LoadFileAllowMissing(kubeconfigPath)
-			if err != nil {
+			var kubeconfigExists bool
+			kubeconfig, err := util.LoadFile(kubeconfigPath)
+			if err != nil && !errors.Is(err, os.ErrNotExist) {
 				return fmt.Errorf("failed to load kubeconfig at %s: %w", kubeconfigPath, err)
+			}
+			if err == nil {
+				kubeconfigExists = true
 			}
 
 			logentry.Debugf("Loading Oxide token from %s", tokenFilePath)
@@ -97,13 +110,17 @@ func rootCmd() (*cobra.Command, error) {
 				controlPlaneSecret, kubeconfig, pubkey,
 			)
 			logentry.Debugf("Ensuring project exists: %s", clusterProject)
-			newKubeconfig, err := c.Initialize(ctx, clusterInitWait)
+			var kubeconfigToPass []byte
+			if kubeconfigExists {
+				kubeconfigToPass = kubeconfig
+			}
+			newKubeconfig, err := c.Initialize(ctx, clusterInitWait, kubeconfigToPass, kubeconfigOverwrite)
 			if err != nil {
 				return fmt.Errorf("failed to initialize setup: %v", err)
 			}
 			if len(kubeconfig) == 0 && len(newKubeconfig) > 0 {
 				logentry.Infof("Saving new kubeconfig to %s", kubeconfigPath)
-				if err := util.SaveFileIfNotExists(kubeconfigPath, newKubeconfig); err != nil {
+				if err := util.SaveFile(kubeconfigPath, newKubeconfig, kubeconfigOverwrite); err != nil {
 					return fmt.Errorf("failed to save kubeconfig: %w", err)
 				}
 			}
@@ -132,6 +149,7 @@ func rootCmd() (*cobra.Command, error) {
 	cmd.Flags().IntVar(&clusterInitWait, "cluster-init-wait", 5, "Time to wait for the first control plane node to be up and running (in minutes)")
 	cmd.Flags().StringVar(&userSSHPublicKey, "user-ssh-public-key", "", "Path to public key to inject in all deployed cloud instances")
 	cmd.Flags().StringVar(&kubeconfigPath, "kubeconfig", "~/.kube/oxide-controller-config", "Path to save kubeconfig when generating new cluster, or to use for accessing existing cluster")
+	cmd.Flags().BoolVar(&kubeconfigOverwrite, "kubeconfig-overwrite", false, "Whether or not to override the kubeconfig file if it already exists and a new cluster is created")
 	cmd.Flags().StringVar(&controlPlaneSecret, "control-plane-secret", "kube-system/oxide-controller-secret", "secret in Kubernetes cluster where the following are stored: join token, user ssh public key, controller ssh private/public keypair; should be as <namespace>/<name>")
 	cmd.Flags().IntVarP(&verbose, "verbose", "v", 0, "set log level, 0 is info, 1 is debug, 2 is trace")
 	cmd.Flags().StringVar(&address, "address", ":8080", "Address to bind the server to")

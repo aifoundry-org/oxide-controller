@@ -7,7 +7,7 @@ import (
 	"github.com/aifoundry-org/oxide-controller/pkg/util"
 )
 
-func (c *Cluster) Initialize(ctx context.Context, timeoutMinutes int) (newKubeconfig []byte, err error) {
+func (c *Cluster) Initialize(ctx context.Context, timeoutMinutes int, kubeconfig []byte, kubeconfigOverwrite bool) (newKubeconfig []byte, err error) {
 
 	projectID, err := ensureProjectExists(ctx, c.logger, c.client, c.projectID)
 	if err != nil {
@@ -31,5 +31,5 @@ func (c *Cluster) Initialize(ctx context.Context, timeoutMinutes int) (newKubeco
 	c.workerSpec.Image = images[1]
 	c.workerSpec.DiskSize = util.RoundUp(images[0].Size, GB)
 
-	return c.ensureClusterExists(ctx, timeoutMinutes)
+	return c.ensureClusterExists(ctx, timeoutMinutes, kubeconfig, kubeconfigOverwrite)
 }

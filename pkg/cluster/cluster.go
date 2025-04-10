@@ -43,7 +43,7 @@ func New(logger *log.Entry, client *oxide.Client, projectID string, prefix strin
 }
 
 // ensureClusterExists checks if a k3s cluster exists, and creates one if needed
-func (c *Cluster) ensureClusterExists(ctx context.Context, timeoutMinutes int) (newKubeconfig []byte, err error) {
+func (c *Cluster) ensureClusterExists(ctx context.Context, timeoutMinutes int, existingKubeconfig []byte, kubeconfigOverwrite bool) (newKubeconfig []byte, err error) {
 	// local vars just for convenience
 	client := c.client
 	projectID := c.projectID
@@ -74,6 +74,16 @@ func (c *Cluster) ensureClusterExists(ctx context.Context, timeoutMinutes int) (
 		return nil, nil
 	}
 
+	if len(controlPlaneNodes) > 0 && len(existingKubeconfig) > 0 {
+		c.logger.Debugf("Found %d control plane nodes, but kubeconfig already exists", len(controlPlaneNodes))
+		// TODO: check to see if it can access the cluster
+	}
+
+	if len(controlPlaneNodes) == 0 && len(existingKubeconfig) > 0 && !kubeconfigOverwrite {
+		c.logger.Debugf("Found no control plane nodes, but kubeconfig already exists")
+		return nil, fmt.Errorf("kubeconfig already exists but cluster does not")
+	}
+
 	controlPlaneIP, err := c.ensureControlPlaneIP(ctx, controlPlanePrefix)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get control plane IP: %w", err)
@@ -102,9 +112,6 @@ func (c *Cluster) ensureClusterExists(ctx context.Context, timeoutMinutes int) (
 	var kubeconfig = c.kubeconfig
 	// if we did not have any nodes, create a cluster
 	if len(controlPlaneNodes) == 0 {
-		if len(c.kubeconfig) > 0 {
-			return nil, fmt.Errorf("kubeconfig already exists but cluster does not")
-		}
 		highest++
 		secrets := make(map[string][]byte)
 		priv, pub, err := util.SSHKeyPair()
