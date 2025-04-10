@@ -3,6 +3,7 @@ package cluster
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -184,9 +185,14 @@ func (c *Cluster) ensureClusterExists(ctx context.Context, timeoutMinutes int) (
 
 		c.logger.Debugf("retrieved new kubeconfig of size %d", len(kubeconfig))
 
+		// have to change the kubeconfig to use the floating IP
+		kubeconfigString := string(kubeconfig)
+		re := regexp.MustCompile(`(server:\s*\w+://)(\d+\.\d+\.\d+\.\d+)(:\d+)`)
+		kubeconfigString = re.ReplaceAllString(kubeconfigString, fmt.Sprintf("${1}%s${3}", controlPlaneIP.Ip))
+
 		// save the join token, system ssh key pair, user ssh key to the Kubernetes secret
 		c.logger.Debugf("Saving secret %s to Kubernetes", secretName)
-		if err := saveSecret(ctx, c.logger, secretName, kubeconfig, secrets); err != nil {
+		if err := saveSecret(ctx, c.logger, secretName, []byte(kubeconfigString), secrets); err != nil {
 			return nil, fmt.Errorf("failed to save secret: %w", err)
 		}
 
