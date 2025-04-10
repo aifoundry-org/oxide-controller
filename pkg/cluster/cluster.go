@@ -189,10 +189,11 @@ func (c *Cluster) ensureClusterExists(ctx context.Context, timeoutMinutes int) (
 		kubeconfigString := string(kubeconfig)
 		re := regexp.MustCompile(`(server:\s*\w+://)(\d+\.\d+\.\d+\.\d+)(:\d+)`)
 		kubeconfigString = re.ReplaceAllString(kubeconfigString, fmt.Sprintf("${1}%s${3}", controlPlaneIP.Ip))
+		c.kubeconfig = []byte(kubeconfigString)
 
 		// save the join token, system ssh key pair, user ssh key to the Kubernetes secret
 		c.logger.Debugf("Saving secret %s to Kubernetes", secretName)
-		if err := saveSecret(ctx, c.logger, secretName, []byte(kubeconfigString), secrets); err != nil {
+		if err := saveSecret(ctx, c.logger, secretName, c.kubeconfig, secrets); err != nil {
 			return nil, fmt.Errorf("failed to save secret: %w", err)
 		}
 
