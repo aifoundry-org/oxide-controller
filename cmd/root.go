@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/oxidecomputer/oxide.go/oxide"
 	log "github.com/sirupsen/logrus"
@@ -71,7 +72,8 @@ func rootCmd() (*cobra.Command, error) {
 			}
 
 			logentry.Debugf("Loading Oxide token from %s", tokenFilePath)
-			oxideToken, err := util.LoadFile(tokenFilePath)
+			b, err := util.LoadFile(tokenFilePath)
+			oxideToken := strings.TrimSuffix(string(b), "\n")
 			if err != nil {
 				return fmt.Errorf("failed to load oxide token at %s: %w", tokenFilePath, err)
 			}
