@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"strings"
 )
 
 // LoadFile loads the contents from the specified path
@@ -68,7 +69,11 @@ func DownloadFile(filepath, url string) error {
 // SaveFileIfNotExists saves a file to the specified path if it does not already exist
 func SaveFileIfNotExists(path string, data []byte) error {
 	// Check if the file exists
-	if _, err := os.Stat(path); err == nil {
+	p, err := expandPath(path)
+	if err != nil {
+		return fmt.Errorf("failed to expand path: %w", err)
+	}
+	if _, err := os.Stat(p); err == nil {
 		// File exists
 		return fmt.Errorf("file already exists")
 	} else if !os.IsNotExist(err) {
@@ -77,5 +82,17 @@ func SaveFileIfNotExists(path string, data []byte) error {
 	}
 
 	// Write the file if it doesn't exist
-	return os.WriteFile(path, data, 0644)
+	return os.WriteFile(p, data, 0644)
+}
+
+// expandPath ensure that the path is expanded
+func expandPath(path string) (string, error) {
+	if strings.HasPrefix(path, "~/") {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", err
+		}
+		return strings.Replace(path, "~", home, 1), nil
+	}
+	return path, nil
 }
