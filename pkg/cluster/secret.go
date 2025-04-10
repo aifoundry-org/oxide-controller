@@ -2,7 +2,6 @@ package cluster
 
 import (
 	"context"
-	"encoding/base64"
 	"fmt"
 	"strings"
 
@@ -23,11 +22,8 @@ func getSecretValue(ctx context.Context, logger *log.Entry, kubeconfig []byte, s
 	if !ok {
 		return nil, fmt.Errorf("key '%s' not found in secret", key)
 	}
-	decodedValue, err := base64.StdEncoding.DecodeString(string(value))
-	if err != nil {
-		return nil, fmt.Errorf("failed to decode value: %w", err)
-	}
-	return decodedValue, nil
+	// no need to base64-decode, since the API returns the raw secret
+	return value, nil
 }
 
 // GetJoinToken retrieves a new k3s worker join token from the Kubernetes cluster
