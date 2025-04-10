@@ -23,15 +23,13 @@ func SSHKeyPair() ([]byte, []byte, error) {
 		return nil, nil, err
 	}
 
-	// Encode private key to PEM (OpenSSH format typically uses its own encoding,
-	// but we’ll use PEM for demonstration; OpenSSH private keys are usually stored
-	// in a different format via ssh-keygen)
+	// Encode private key to PEM as openssh
 	privPEM := new(bytes.Buffer)
-	err = pem.Encode(privPEM, &pem.Block{
-		Type:  "OPENSSH PRIVATE KEY",
-		Bytes: priv, // raw private key bytes
-	})
+	sshPrivKey, err := ssh.MarshalPrivateKey(priv, "ainekko-oxide-controller")
 	if err != nil {
+		return nil, nil, err
+	}
+	if err := pem.Encode(privPEM, sshPrivKey); err != nil {
 		return nil, nil, err
 	}
 	return privPEM.Bytes(), ssh.MarshalAuthorizedKey(pubKey), nil

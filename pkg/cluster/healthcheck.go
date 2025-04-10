@@ -25,5 +25,13 @@ func isClusterAlive(apiServerURL string) bool {
 	}
 	defer resp.Body.Close()
 
-	return resp.StatusCode == http.StatusOK
+	switch resp.StatusCode {
+	case http.StatusOK:
+		return true
+	case http.StatusUnauthorized:
+		return true
+	case http.StatusForbidden:
+		return true
+	}
+	return false
 }

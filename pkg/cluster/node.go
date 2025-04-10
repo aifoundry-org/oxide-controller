@@ -3,6 +3,7 @@ package cluster
 import (
 	"context"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"time"
 
@@ -44,41 +45,52 @@ func CreateInstance(ctx context.Context, client *oxide.Client, projectID, instan
 
 // GenerateCloudConfig for a particular node type
 func GenerateCloudConfig(nodeType string, initCluster bool, controlPlaneIP, joinToken string, pubkey []string) (string, error) {
-	// initial: curl -sfL https://get.k3s.io | sh -s - server --cluster-init --tls-san <floatingIP>
-	// control plane nodes: curl -sfL https://get.k3s.io | sh -s - server --server https://${SERVER} --token '${TOKEN}'
-	// worker nodes: curl -sfL https://get.k3s.io | sh -s - agent --server https://${SERVER} --token '${TOKEN}'
-	var initFlag, tokenFlag, typeFlag, sanFlag, serverFlag string
+	var (
+		initFlag, tokenFlag, sanFlag, typeFlag, serverFlag, nodeFlag string
+		port                                                         int = 6443
+	)
+
 	switch nodeType {
 	case "server":
 		typeFlag = "server"
 		if initCluster {
 			initFlag = "--cluster-init"
 			sanFlag = fmt.Sprintf("--tls-san %s", controlPlaneIP)
+			nodeFlag = fmt.Sprintf("--node-external-ip %s", controlPlaneIP)
 		} else {
-			serverFlag = fmt.Sprintf("--server https://%s:6443", controlPlaneIP)
+			serverFlag = fmt.Sprintf("--server https://%s:%d", controlPlaneIP, port)
 			tokenFlag = fmt.Sprintf("--token %s", joinToken)
 		}
 	case "agent":
 		typeFlag = "agent"
-		serverFlag = fmt.Sprintf("--server https://%s:6443", controlPlaneIP)
+		serverFlag = fmt.Sprintf("--server https://%s:%d", controlPlaneIP, port)
 		tokenFlag = fmt.Sprintf("--token %s", joinToken)
 	default:
-		return "", fmt.Errorf("Unknown node type: %s", nodeType)
+		return "", fmt.Errorf("unknown node type: %s", nodeType)
 	}
+	var sshKeysSection string
+	if len(pubkey) > 0 {
+		sshKeysSection = "    ssh-authorized-keys:\n"
+		for _, key := range pubkey {
+			sshKeysSection += fmt.Sprintf("      - %s\n", key)
+		}
+	}
+
 	content := fmt.Sprintf(`
 #cloud-config
 users:
   - name: root
-    ssh-authorized-keys: [%s]
+%s  
     shell: /bin/bash
 ssh_pwauth: false  # disables password logins
 disable_root: false  # ensure root isn't disabled
 allow_public_ssh_keys: true
 runcmd:
-  - curl -sfL https://get.k3s.io | sh -s - %s %s %s %s %s %s
-`,
-		pubkey,
-		typeFlag, initFlag, sanFlag, tokenFlag, serverFlag, sanFlag)
+  - |
+    PRIVATE_IP=$(hostname -I | awk '{print $1}')
+    PUBLIC_IP=$(curl -s https://ifconfig.me)
+    curl -sfL https://get.k3s.io | sh -s - %s %s %s %s %s %s --tls-san ${PRIVATE_IP} --tls-san ${PUBLIC_IP}
+`, sshKeysSection, typeFlag, initFlag, sanFlag, tokenFlag, serverFlag, nodeFlag)
 	return base64.StdEncoding.EncodeToString([]byte(content)), nil
 }
 
@@ -97,7 +109,7 @@ func (c *Cluster) CreateControlPlaneNodes(ctx context.Context, initCluster bool,
 			return nil, fmt.Errorf("failed to get join token: %w", err)
 		}
 		pubkey, err = c.GetUserSSHPublicKey(ctx)
-		if err != nil {
+		if err != nil && !errors.Is(err, &SecretKeyNotFoundError{}) {
 			return nil, fmt.Errorf("failed to get user SSH public key: %w", err)
 		}
 	}
@@ -114,7 +126,7 @@ func (c *Cluster) CreateControlPlaneNodes(ctx context.Context, initCluster bool,
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate cloud config: %w", err)
 	}
-	for i := start; i < count; i++ {
+	for i := start; i < start+count; i++ {
 		instance, err := CreateInstance(ctx, c.client, c.projectID, fmt.Sprintf("%s%d", c.prefix, i), c.controlPlaneSpec, cloudConfig)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create control plane node: %w", err)
@@ -134,10 +146,14 @@ func (c *Cluster) CreateWorkerNodes(ctx context.Context, count int) ([]oxide.Ins
 		return nil, fmt.Errorf("failed to get join token: %w", err)
 	}
 	pubkey, err := c.GetUserSSHPublicKey(ctx)
-	if err != nil {
+	if err != nil && !errors.Is(err, &SecretKeyNotFoundError{}) {
 		return nil, fmt.Errorf("failed to get user SSH public key: %w", err)
 	}
-	cloudConfig, err := GenerateCloudConfig("agent", false, c.controlPlaneIP, joinToken, []string{string(pubkey)})
+	var pubkeys []string
+	if len(pubkey) > 0 {
+		pubkeys = append(pubkeys, string(pubkey))
+	}
+	cloudConfig, err := GenerateCloudConfig("agent", false, c.controlPlaneIP, joinToken, pubkeys)
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate cloud config: %w", err)
 	}

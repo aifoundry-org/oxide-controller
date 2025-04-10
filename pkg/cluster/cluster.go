@@ -3,6 +3,7 @@ package cluster
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -42,7 +43,7 @@ func New(logger *log.Entry, client *oxide.Client, projectID string, prefix strin
 }
 
 // ensureClusterExists checks if a k3s cluster exists, and creates one if needed
-func (c *Cluster) ensureClusterExists(ctx context.Context, timeoutMinutes int) (newKubeconfig []byte, err error) {
+func (c *Cluster) ensureClusterExists(ctx context.Context, timeoutMinutes int, existingKubeconfig []byte, kubeconfigOverwrite bool) (newKubeconfig []byte, err error) {
 	// local vars just for convenience
 	client := c.client
 	projectID := c.projectID
@@ -73,6 +74,16 @@ func (c *Cluster) ensureClusterExists(ctx context.Context, timeoutMinutes int) (
 		return nil, nil
 	}
 
+	if len(controlPlaneNodes) > 0 && len(existingKubeconfig) > 0 {
+		c.logger.Debugf("Found %d control plane nodes, but kubeconfig already exists", len(controlPlaneNodes))
+		// TODO: check to see if it can access the cluster
+	}
+
+	if len(controlPlaneNodes) == 0 && len(existingKubeconfig) > 0 && !kubeconfigOverwrite {
+		c.logger.Debugf("Found no control plane nodes, but kubeconfig already exists")
+		return nil, fmt.Errorf("kubeconfig already exists but cluster does not")
+	}
+
 	controlPlaneIP, err := c.ensureControlPlaneIP(ctx, controlPlanePrefix)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get control plane IP: %w", err)
@@ -101,9 +112,6 @@ func (c *Cluster) ensureClusterExists(ctx context.Context, timeoutMinutes int) (
 	var kubeconfig = c.kubeconfig
 	// if we did not have any nodes, create a cluster
 	if len(controlPlaneNodes) == 0 {
-		if len(c.kubeconfig) > 0 {
-			return nil, fmt.Errorf("kubeconfig already exists but cluster does not")
-		}
 		highest++
 		secrets := make(map[string][]byte)
 		priv, pub, err := util.SSHKeyPair()
@@ -137,7 +145,7 @@ func (c *Cluster) ensureClusterExists(ctx context.Context, timeoutMinutes int) (
 		// wait for the control plane node to be up and running
 		timeLeft := time.Duration(timeoutMinutes) * time.Minute
 		for {
-			c.logger.Infof("Waiting %d mins for control plane node %s to be up and running...", timeLeft, controlPlaneIP)
+			c.logger.Infof("Waiting %s for control plane node %s to be up and running...", timeLeft, controlPlaneIP)
 			sleepTime := 1 * time.Minute
 			time.Sleep(sleepTime)
 			timeLeft -= sleepTime
@@ -153,7 +161,6 @@ func (c *Cluster) ensureClusterExists(ctx context.Context, timeoutMinutes int) (
 		// attach the floating IP to the control plane node
 		if _, err := client.FloatingIpAttach(ctx, oxide.FloatingIpAttachParams{
 			FloatingIp: oxide.NameOrId(controlPlaneIP.Id),
-			Project:    oxide.NameOrId(projectID),
 			Body: &oxide.FloatingIpAttach{
 				Kind:   oxide.FloatingIpParentKindInstance,
 				Parent: oxide.NameOrId(hostid),
@@ -185,9 +192,15 @@ func (c *Cluster) ensureClusterExists(ctx context.Context, timeoutMinutes int) (
 
 		c.logger.Debugf("retrieved new kubeconfig of size %d", len(kubeconfig))
 
+		// have to change the kubeconfig to use the floating IP
+		kubeconfigString := string(kubeconfig)
+		re := regexp.MustCompile(`(server:\s*\w+://)(\d+\.\d+\.\d+\.\d+)(:\d+)`)
+		kubeconfigString = re.ReplaceAllString(kubeconfigString, fmt.Sprintf("${1}%s${3}", controlPlaneIP.Ip))
+		c.kubeconfig = []byte(kubeconfigString)
+
 		// save the join token, system ssh key pair, user ssh key to the Kubernetes secret
 		c.logger.Debugf("Saving secret %s to Kubernetes", secretName)
-		if err := saveSecret(ctx, c.logger, secretName, kubeconfig, secrets); err != nil {
+		if err := saveSecret(ctx, c.logger, secretName, c.kubeconfig, secrets); err != nil {
 			return nil, fmt.Errorf("failed to save secret: %w", err)
 		}
 
@@ -204,5 +217,5 @@ func (c *Cluster) ensureClusterExists(ctx context.Context, timeoutMinutes int) (
 	}
 
 	c.logger.Debugf("Completed %d control plane nodes exist with prefix %s", controlPlaneCount, controlPlanePrefix)
-	return kubeconfig, nil
+	return c.kubeconfig, nil
 }

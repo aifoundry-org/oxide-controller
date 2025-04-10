@@ -2,7 +2,6 @@ package cluster
 
 import (
 	"context"
-	"encoding/base64"
 	"fmt"
 	"strings"
 
@@ -21,30 +20,29 @@ func getSecretValue(ctx context.Context, logger *log.Entry, kubeconfig []byte, s
 	}
 	value, ok := secretData[key]
 	if !ok {
-		return nil, fmt.Errorf("key '%s' not found in secret", key)
+		return nil, NewSecretKeyNotFoundError(key)
 	}
-	decodedValue, err := base64.StdEncoding.DecodeString(string(value))
-	if err != nil {
-		return nil, fmt.Errorf("failed to decode value: %w", err)
-	}
-	return decodedValue, nil
+	// no need to base64-decode, since the API returns the raw secret
+	return value, nil
 }
 
 // GetJoinToken retrieves a new k3s worker join token from the Kubernetes cluster
 func (c *Cluster) GetJoinToken(ctx context.Context) (string, error) {
 	value, err := getSecretValue(ctx, c.logger, c.kubeconfig, c.secretName, secretKeyJoinToken)
 	if err != nil {
-		return "", fmt.Errorf("failed to get join token: %w", err)
+		return "", err
 	}
 	// convert to string
-	return string(value), nil
+	valStr := string(value)
+	// remove trailing newlines
+	return strings.TrimSuffix(valStr, "\n"), nil
 }
 
 // GetUserSSHPublicKey retrieves the SSH public key from the Kubernetes cluster
 func (c *Cluster) GetUserSSHPublicKey(ctx context.Context) ([]byte, error) {
 	pubkey, err := getSecretValue(ctx, c.logger, c.kubeconfig, c.secretName, secretKeyUserSSH)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get user SSH public key: %w", err)
+		return nil, err
 	}
 	return pubkey, nil
 }

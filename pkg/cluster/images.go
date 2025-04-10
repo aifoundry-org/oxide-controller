@@ -22,29 +22,52 @@ func ensureImagesExist(ctx context.Context, logger *log.Entry, client *oxide.Cli
 	//       `images` array is never long, few more requests shouldn't harm.
 	// TODO: Do we need pagination? Using arbitrary limit for now.
 	logger.Debugf("Listing images for project %s", projectID)
-	existing, err := client.ImageList(ctx, oxide.ImageListParams{Project: oxide.NameOrId(projectID), Limit: oxide.NewPointer(32)})
+	projectImages, err := client.ImageListAllPages(ctx, oxide.ImageListParams{Project: oxide.NameOrId(projectID), Limit: oxide.NewPointer(32)})
 	if err != nil {
-		return nil, fmt.Errorf("failed to list images: %w", err)
+		return nil, fmt.Errorf("failed to list project images: %w", err)
 	}
-	logger.Debugf("total images %d", len(existing.Items))
+	logger.Debugf("total project images %d", len(projectImages))
+	logger.Debugf("Listing global images for sled")
+	globalImages, err := client.ImageListAllPages(ctx, oxide.ImageListParams{Limit: oxide.NewPointer(32)})
+	if err != nil {
+		return nil, fmt.Errorf("failed to list global images: %w", err)
+	}
+	logger.Debugf("total global images %d", len(globalImages))
 	var (
-		missingImages []Image
-		imageMap      = make(map[string]*oxide.Image)
-		idMap         = make(map[string]*oxide.Image)
+		missingImages   []Image
+		projectImageMap = make(map[string]*oxide.Image)
+		globalImageMap  = make(map[string]*oxide.Image)
+		imageMap        = make(map[string]*oxide.Image)
+		idMap           = make(map[string]*oxide.Image)
 	)
-	for _, image := range existing.Items {
-		imageMap[string(image.Name)] = &image
+	for _, image := range projectImages {
+		projectImageMap[string(image.Name)] = &image
+	}
+	for _, image := range globalImages {
+		globalImageMap[string(image.Name)] = &image
 	}
 	for i := range images {
-		if _, ok := imageMap[images[i].Name]; !ok {
-			logger.Infof("Image %+v not found, adding to list", images[i])
-			missingImages = append(missingImages, images[i])
-		} else {
+		if image, ok := projectImageMap[images[i].Name]; ok {
+			logger.Infof("Image %s found in project images", images[i].Name)
 			name := images[i].Name
-			idMap[name] = imageMap[name]
-			images[i].ID = imageMap[name].Id
-			images[i].Size = int(imageMap[name].Size)
+			idMap[name] = image
+			images[i].ID = image.Id
+			images[i].Size = int(image.Size)
+			imageMap[name] = image
+			continue
 		}
+		if image, ok := globalImageMap[images[i].Name]; ok {
+			logger.Infof("Image %s found in global images", images[i].Name)
+			name := images[i].Name
+			idMap[name] = image
+			images[i].ID = image.Id
+			images[i].Size = int(image.Size)
+			imageMap[name] = image
+			continue
+		}
+		// did not find it in either
+		logger.Infof("Image %+v not found, adding to list", images[i])
+		missingImages = append(missingImages, images[i])
 	}
 
 	for _, missingImage := range missingImages {
