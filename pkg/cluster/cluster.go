@@ -153,7 +153,6 @@ func (c *Cluster) ensureClusterExists(ctx context.Context, timeoutMinutes int) (
 		// attach the floating IP to the control plane node
 		if _, err := client.FloatingIpAttach(ctx, oxide.FloatingIpAttachParams{
 			FloatingIp: oxide.NameOrId(controlPlaneIP.Id),
-			Project:    oxide.NameOrId(projectID),
 			Body: &oxide.FloatingIpAttach{
 				Kind:   oxide.FloatingIpParentKindInstance,
 				Parent: oxide.NameOrId(hostid),
