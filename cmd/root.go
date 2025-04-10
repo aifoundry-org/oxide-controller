@@ -118,7 +118,7 @@ func rootCmd() (*cobra.Command, error) {
 			if err != nil {
 				return fmt.Errorf("failed to initialize setup: %v", err)
 			}
-			if len(kubeconfig) == 0 && len(newKubeconfig) > 0 {
+			if len(newKubeconfig) > 0 && (len(kubeconfig) == 0 || kubeconfigOverwrite) {
 				logentry.Infof("Saving new kubeconfig to %s", kubeconfigPath)
 				if err := util.SaveFile(kubeconfigPath, newKubeconfig, kubeconfigOverwrite); err != nil {
 					return fmt.Errorf("failed to save kubeconfig: %w", err)

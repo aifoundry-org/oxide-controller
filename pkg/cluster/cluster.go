@@ -217,5 +217,5 @@ func (c *Cluster) ensureClusterExists(ctx context.Context, timeoutMinutes int, e
 	}
 
 	c.logger.Debugf("Completed %d control plane nodes exist with prefix %s", controlPlaneCount, controlPlanePrefix)
-	return kubeconfig, nil
+	return c.kubeconfig, nil
 }
