@@ -20,7 +20,7 @@ func getSecretValue(ctx context.Context, logger *log.Entry, kubeconfig []byte, s
 	}
 	value, ok := secretData[key]
 	if !ok {
-		return nil, fmt.Errorf("key '%s' not found in secret", key)
+		return nil, NewSecretKeyNotFoundError(key)
 	}
 	// no need to base64-decode, since the API returns the raw secret
 	return value, nil
@@ -30,7 +30,7 @@ func getSecretValue(ctx context.Context, logger *log.Entry, kubeconfig []byte, s
 func (c *Cluster) GetJoinToken(ctx context.Context) (string, error) {
 	value, err := getSecretValue(ctx, c.logger, c.kubeconfig, c.secretName, secretKeyJoinToken)
 	if err != nil {
-		return "", fmt.Errorf("failed to get join token: %w", err)
+		return "", err
 	}
 	// convert to string
 	return string(value), nil
@@ -40,7 +40,7 @@ func (c *Cluster) GetJoinToken(ctx context.Context) (string, error) {
 func (c *Cluster) GetUserSSHPublicKey(ctx context.Context) ([]byte, error) {
 	pubkey, err := getSecretValue(ctx, c.logger, c.kubeconfig, c.secretName, secretKeyUserSSH)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get user SSH public key: %w", err)
+		return nil, err
 	}
 	return pubkey, nil
 }

@@ -3,6 +3,7 @@ package cluster
 import (
 	"context"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"time"
 
@@ -108,7 +109,7 @@ func (c *Cluster) CreateControlPlaneNodes(ctx context.Context, initCluster bool,
 			return nil, fmt.Errorf("failed to get join token: %w", err)
 		}
 		pubkey, err = c.GetUserSSHPublicKey(ctx)
-		if err != nil {
+		if err != nil && !errors.Is(err, &SecretKeyNotFoundError{}) {
 			return nil, fmt.Errorf("failed to get user SSH public key: %w", err)
 		}
 	}
@@ -145,10 +146,14 @@ func (c *Cluster) CreateWorkerNodes(ctx context.Context, count int) ([]oxide.Ins
 		return nil, fmt.Errorf("failed to get join token: %w", err)
 	}
 	pubkey, err := c.GetUserSSHPublicKey(ctx)
-	if err != nil {
+	if err != nil && !errors.Is(err, &SecretKeyNotFoundError{}) {
 		return nil, fmt.Errorf("failed to get user SSH public key: %w", err)
 	}
-	cloudConfig, err := GenerateCloudConfig("agent", false, c.controlPlaneIP, joinToken, []string{string(pubkey)})
+	var pubkeys []string
+	if len(pubkey) > 0 {
+		pubkeys = append(pubkeys, string(pubkey))
+	}
+	cloudConfig, err := GenerateCloudConfig("agent", false, c.controlPlaneIP, joinToken, pubkeys)
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate cloud config: %w", err)
 	}
