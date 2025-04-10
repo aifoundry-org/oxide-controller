@@ -126,7 +126,7 @@ func (c *Cluster) CreateControlPlaneNodes(ctx context.Context, initCluster bool,
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate cloud config: %w", err)
 	}
-	for i := start; i < count; i++ {
+	for i := start; i < start+count; i++ {
 		instance, err := CreateInstance(ctx, c.client, c.projectID, fmt.Sprintf("%s%d", c.prefix, i), c.controlPlaneSpec, cloudConfig)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create control plane node: %w", err)
