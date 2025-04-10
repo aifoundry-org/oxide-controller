@@ -137,7 +137,7 @@ func (c *Cluster) ensureClusterExists(ctx context.Context, timeoutMinutes int) (
 		// wait for the control plane node to be up and running
 		timeLeft := time.Duration(timeoutMinutes) * time.Minute
 		for {
-			c.logger.Infof("Waiting %d mins for control plane node %s to be up and running...", timeLeft, controlPlaneIP)
+			c.logger.Infof("Waiting %s for control plane node %s to be up and running...", timeLeft, controlPlaneIP)
 			sleepTime := 1 * time.Minute
 			time.Sleep(sleepTime)
 			timeLeft -= sleepTime
