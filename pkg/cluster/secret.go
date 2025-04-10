@@ -33,7 +33,9 @@ func (c *Cluster) GetJoinToken(ctx context.Context) (string, error) {
 		return "", err
 	}
 	// convert to string
-	return string(value), nil
+	valStr := string(value)
+	// remove trailing newlines
+	return strings.TrimSuffix(valStr, "\n"), nil
 }
 
 // GetUserSSHPublicKey retrieves the SSH public key from the Kubernetes cluster
