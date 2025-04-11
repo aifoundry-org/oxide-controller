@@ -11,7 +11,7 @@ import (
 )
 
 func CreateInstance(ctx context.Context, client *oxide.Client, projectID, instanceName string, spec NodeSpec, cloudConfig string) (*oxide.Instance, error) {
-	return client.InstanceCreate(ctx, oxide.InstanceCreateParams{
+	params := oxide.InstanceCreateParams{
 		Project: oxide.NameOrId(projectID),
 		Body: &oxide.InstanceCreate{
 			Name:        oxide.Name(instanceName),
@@ -30,17 +30,20 @@ func CreateInstance(ctx context.Context, client *oxide.Client, projectID, instan
 				Name:        oxide.Name(instanceName),
 				Description: instanceName,
 			},
-			ExternalIps: []oxide.ExternalIpCreate{
-				{
-					Type: oxide.ExternalIpCreateTypeEphemeral,
-				},
-			},
 			NetworkInterfaces: oxide.InstanceNetworkInterfaceAttachment{
 				Type: "default",
 			},
 			UserData: cloudConfig,
 		},
-	})
+	}
+	if spec.ExternalIP {
+		params.Body.ExternalIps = []oxide.ExternalIpCreate{
+			{
+				Type: oxide.ExternalIpCreateTypeEphemeral,
+			},
+		}
+	}
+	return client.InstanceCreate(ctx, params)
 }
 
 // GenerateCloudConfig for a particular node type
