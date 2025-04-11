@@ -38,6 +38,8 @@ func rootCmd() (*cobra.Command, error) {
 		controlPlaneSecret      string
 		verbose                 int
 		address                 string
+		workerExternalIP        bool
+		controlPlaneExternalIP  bool
 
 		logger = log.New()
 	)
@@ -105,8 +107,8 @@ func rootCmd() (*cobra.Command, error) {
 
 			c := cluster.New(logentry, oxideClient, clusterProject,
 				controlPlanePrefix, controlPlaneCount,
-				cluster.NodeSpec{Image: cluster.Image{Name: controlPlaneImageName, Source: controlPlaneImageSource}, MemoryGB: int(controlPlaneMemory), CPUCount: int(controlPlaneCPU)},
-				cluster.NodeSpec{Image: cluster.Image{Name: workerImageName, Source: workerImageSource}, MemoryGB: int(workerMemory), CPUCount: int(workerCPU)},
+				cluster.NodeSpec{Image: cluster.Image{Name: controlPlaneImageName, Source: controlPlaneImageSource}, MemoryGB: int(controlPlaneMemory), CPUCount: int(controlPlaneCPU), ExternalIP: controlPlaneExternalIP},
+				cluster.NodeSpec{Image: cluster.Image{Name: workerImageName, Source: workerImageSource}, MemoryGB: int(workerMemory), CPUCount: int(workerCPU), ExternalIP: workerExternalIP},
 				controlPlaneSecret, kubeconfig, pubkey,
 			)
 			logentry.Debugf("Ensuring project exists: %s", clusterProject)
@@ -151,6 +153,8 @@ func rootCmd() (*cobra.Command, error) {
 	cmd.Flags().StringVar(&kubeconfigPath, "kubeconfig", "~/.kube/oxide-controller-config", "Path to save kubeconfig when generating new cluster, or to use for accessing existing cluster")
 	cmd.Flags().BoolVar(&kubeconfigOverwrite, "kubeconfig-overwrite", false, "Whether or not to override the kubeconfig file if it already exists and a new cluster is created")
 	cmd.Flags().StringVar(&controlPlaneSecret, "control-plane-secret", "kube-system/oxide-controller-secret", "secret in Kubernetes cluster where the following are stored: join token, user ssh public key, controller ssh private/public keypair; should be as <namespace>/<name>")
+	cmd.Flags().BoolVar(&workerExternalIP, "worker-external-ip", false, "Whether or not to assign an ephemeral public IP to the worker nodes, useful for debugging")
+	cmd.Flags().BoolVar(&controlPlaneExternalIP, "control-plane-external-ip", true, "Whether or not to assign an ephemeral public IP to the control plane nodes, needed to access cluster from outside sled, as well as for debugging")
 	cmd.Flags().IntVarP(&verbose, "verbose", "v", 0, "set log level, 0 is info, 1 is debug, 2 is trace")
 	cmd.Flags().StringVar(&address, "address", ":8080", "Address to bind the server to")
 
