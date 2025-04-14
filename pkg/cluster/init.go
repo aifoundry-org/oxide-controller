@@ -31,5 +31,14 @@ func (c *Cluster) Initialize(ctx context.Context, timeoutMinutes int, kubeconfig
 	c.workerSpec.Image = images[1]
 	c.workerSpec.DiskSize = util.RoundUp(images[0].Size, GB)
 
-	return c.ensureClusterExists(ctx, timeoutMinutes, kubeconfig, kubeconfigOverwrite)
+	newKubeconfig, err = c.ensureClusterExists(ctx, timeoutMinutes, kubeconfig, kubeconfigOverwrite)
+	if err != nil {
+		return nil, fmt.Errorf("cluster verification failed: %v", err)
+	}
+
+	// ensure worker nodes as desired
+	if _, err := c.CreateWorkerNodes(ctx, c.workerCount); err != nil {
+		return nil, fmt.Errorf("failed to create worker nodes: %v", err)
+	}
+	return newKubeconfig, nil
 }

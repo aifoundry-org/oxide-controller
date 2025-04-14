@@ -23,6 +23,7 @@ func rootCmd() (*cobra.Command, error) {
 		clusterProject          string
 		controlPlanePrefix      string
 		controlPlaneCount       int
+		workerCount             int
 		controlPlaneImageName   string
 		controlPlaneImageSource string
 		workerImageName         string
@@ -106,7 +107,7 @@ func rootCmd() (*cobra.Command, error) {
 			ctx := context.Background()
 
 			c := cluster.New(logentry, oxideClient, clusterProject,
-				controlPlanePrefix, controlPlaneCount,
+				controlPlanePrefix, controlPlaneCount, workerCount,
 				cluster.NodeSpec{Image: cluster.Image{Name: controlPlaneImageName, Source: controlPlaneImageSource}, MemoryGB: int(controlPlaneMemory), CPUCount: int(controlPlaneCPU), ExternalIP: controlPlaneExternalIP},
 				cluster.NodeSpec{Image: cluster.Image{Name: workerImageName, Source: workerImageSource}, MemoryGB: int(workerMemory), CPUCount: int(workerCPU), ExternalIP: workerExternalIP},
 				controlPlaneSecret, kubeconfig, pubkey,
@@ -145,6 +146,7 @@ func rootCmd() (*cobra.Command, error) {
 	cmd.Flags().StringVar(&workerImageName, "worker-image-name", "debian-12-cloud", "Image to use for worker nodes")
 	cmd.Flags().StringVar(&workerImageSource, "worker-image-source", "https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-genericcloud-amd64.raw", "Image to use for worker instances")
 	cmd.Flags().Uint64Var(&controlPlaneMemory, "control-plane-memory", 4, "Memory to allocate to each control plane node, in GB")
+	cmd.Flags().IntVar(&workerCount, "worker-count", 0, "Number of worker instances to create on startup and maintain, until changed via API")
 	cmd.Flags().Uint64Var(&workerMemory, "worker-memory", 16, "Memory to allocate to each worker node, in GB")
 	cmd.Flags().Uint16Var(&controlPlaneCPU, "control-plane-cpu", 2, "vCPU count to allocate to each control plane node")
 	cmd.Flags().Uint16Var(&workerCPU, "worker-cpu", 4, "vCPU count to allocate to each worker node")

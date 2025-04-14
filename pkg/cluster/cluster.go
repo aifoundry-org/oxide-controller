@@ -20,6 +20,7 @@ type Cluster struct {
 	projectID                    string
 	prefix                       string
 	controlPlaneCount            int
+	workerCount                  int
 	controlPlaneSpec, workerSpec NodeSpec
 	secretName                   string
 	kubeconfig, userPubkey       []byte
@@ -27,13 +28,14 @@ type Cluster struct {
 }
 
 // New creates a new Cluster instance
-func New(logger *log.Entry, client *oxide.Client, projectID string, prefix string, controlPlaneCount int, controlPlaneSpec, workerSpec NodeSpec, secretName string, kubeconfig, pubkey []byte) *Cluster {
+func New(logger *log.Entry, client *oxide.Client, projectID string, prefix string, controlPlaneCount, workerCount int, controlPlaneSpec, workerSpec NodeSpec, secretName string, kubeconfig, pubkey []byte) *Cluster {
 	return &Cluster{
 		logger:            logger.WithField("component", "cluster"),
 		client:            client,
 		projectID:         projectID,
 		prefix:            prefix,
 		controlPlaneCount: controlPlaneCount,
+		workerCount:       workerCount,
 		controlPlaneSpec:  controlPlaneSpec,
 		workerSpec:        workerSpec,
 		secretName:        secretName,
