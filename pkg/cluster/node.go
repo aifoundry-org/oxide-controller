@@ -1,13 +1,16 @@
 package cluster
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/oxidecomputer/oxide.go/oxide"
+	"gopkg.in/yaml.v3"
 )
 
 func CreateInstance(ctx context.Context, client *oxide.Client, projectID, instanceName string, spec NodeSpec, cloudConfig string) (*oxide.Instance, error) {
@@ -46,55 +49,68 @@ func CreateInstance(ctx context.Context, client *oxide.Client, projectID, instan
 	return client.InstanceCreate(ctx, params)
 }
 
+// GenerateCloudConfigB64 generates a base64 encoded cloud config for a particular node type
+func GenerateCloudConfigB64(nodeType string, initCluster bool, controlPlaneIP, joinToken string, pubkey []string) (string, error) {
+	cloudConfig, err := GenerateCloudConfig(nodeType, initCluster, controlPlaneIP, joinToken, pubkey)
+	if err != nil {
+		return "", fmt.Errorf("failed to generate cloud config: %w", err)
+	}
+	return base64.StdEncoding.EncodeToString(cloudConfig), nil
+}
+
 // GenerateCloudConfig for a particular node type
-func GenerateCloudConfig(nodeType string, initCluster bool, controlPlaneIP, joinToken string, pubkey []string) (string, error) {
+func GenerateCloudConfig(nodeType string, initCluster bool, controlPlaneIP, joinToken string, pubkey []string) ([]byte, error) {
 	var (
-		initFlag, tokenFlag, sanFlag, typeFlag, serverFlag, nodeFlag string
-		port                                                         int = 6443
+		k3sArgs []string
+		port    int = 6443
 	)
 
 	switch nodeType {
 	case "server":
-		typeFlag = "server"
+		k3sArgs = append(k3sArgs, "server")
 		if initCluster {
-			initFlag = "--cluster-init"
-			sanFlag = fmt.Sprintf("--tls-san %s", controlPlaneIP)
-			nodeFlag = fmt.Sprintf("--node-external-ip %s", controlPlaneIP)
+			k3sArgs = append(k3sArgs, "--cluster-init")
+			k3sArgs = append(k3sArgs, fmt.Sprintf("--tls-san %s", controlPlaneIP))
+			k3sArgs = append(k3sArgs, fmt.Sprintf("--node-external-ip %s", controlPlaneIP))
 		} else {
-			serverFlag = fmt.Sprintf("--server https://%s:%d", controlPlaneIP, port)
-			tokenFlag = fmt.Sprintf("--token %s", joinToken)
+			k3sArgs = append(k3sArgs, fmt.Sprintf("--server https://%s:%d", controlPlaneIP, port))
+			k3sArgs = append(k3sArgs, fmt.Sprintf("--token %s", joinToken))
 		}
+		k3sArgs = append(k3sArgs, "--tls-san ${PRIVATE_IP} --tls-san ${PUBLIC_IP}")
 	case "agent":
-		typeFlag = "agent"
-		serverFlag = fmt.Sprintf("--server https://%s:%d", controlPlaneIP, port)
-		tokenFlag = fmt.Sprintf("--token %s", joinToken)
+		k3sArgs = append(k3sArgs, "agent")
+		k3sArgs = append(k3sArgs, fmt.Sprintf("--server https://%s:%d", controlPlaneIP, port))
+		k3sArgs = append(k3sArgs, fmt.Sprintf("--token %s", joinToken))
 	default:
-		return "", fmt.Errorf("unknown node type: %s", nodeType)
+		return nil, fmt.Errorf("unknown node type: %s", nodeType)
 	}
-	var sshKeysSection string
+	cfg := CloudConfig{}
 	if len(pubkey) > 0 {
-		sshKeysSection = "    ssh-authorized-keys:\n"
-		for _, key := range pubkey {
-			sshKeysSection += fmt.Sprintf("      - %s\n", key)
+		cfg.Users = []User{
+			{Name: "root", Shell: "/bin/bash", SSHAuthorizedKeys: pubkey},
 		}
+	}
+	cfg.RunCmd = MultiLineStrings{
+		{
+			"PRIVATE_IP=$(hostname -I | awk '{print $1}')",
+			"PUBLIC_IP=$(curl -s https://ifconfig.me)",
+			fmt.Sprintf("curl -sfL https://get.k3s.io | sh -s - %s", strings.Join(k3sArgs, " ")),
+		},
+	}
+	cfg.AllowPublicSSHKeys = true
+	cfg.SSHPWAuth = false
+	cfg.DisableRoot = false
+	var buf bytes.Buffer
+	enc := yaml.NewEncoder(&buf)
+	enc.SetIndent(2)
+	defer enc.Close()
+
+	if err := enc.Encode(cfg); err != nil {
+		return nil, fmt.Errorf("failed to marshal cloud config: %w", err)
 	}
 
-	content := fmt.Sprintf(`
-#cloud-config
-users:
-  - name: root
-%s  
-    shell: /bin/bash
-ssh_pwauth: false  # disables password logins
-disable_root: false  # ensure root isn't disabled
-allow_public_ssh_keys: true
-runcmd:
-  - |
-    PRIVATE_IP=$(hostname -I | awk '{print $1}')
-    PUBLIC_IP=$(curl -s https://ifconfig.me)
-    curl -sfL https://get.k3s.io | sh -s - %s %s %s %s %s %s --tls-san ${PRIVATE_IP} --tls-san ${PUBLIC_IP}
-`, sshKeysSection, typeFlag, initFlag, sanFlag, tokenFlag, serverFlag, nodeFlag)
-	return base64.StdEncoding.EncodeToString([]byte(content)), nil
+	content := buf.Bytes()
+	return append([]byte("#cloud-config\n"), content...), nil
 }
 
 // createControlPlaneNodes creates new control plane nodes
@@ -125,10 +141,11 @@ func (c *Cluster) CreateControlPlaneNodes(ctx context.Context, initCluster bool,
 	if additionalPubKeys != nil {
 		pubKeyList = append(pubKeyList, additionalPubKeys...)
 	}
-	cloudConfig, err := GenerateCloudConfig("server", initCluster, c.controlPlaneIP, joinToken, pubKeyList)
+	cloudConfig, err := GenerateCloudConfigB64("server", initCluster, c.controlPlaneIP, joinToken, pubKeyList)
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate cloud config: %w", err)
 	}
+
 	for i := start; i < start+count; i++ {
 		instance, err := CreateInstance(ctx, c.client, c.projectID, fmt.Sprintf("%s%d", c.prefix, i), c.controlPlaneSpec, cloudConfig)
 		if err != nil {
@@ -156,7 +173,7 @@ func (c *Cluster) CreateWorkerNodes(ctx context.Context, count int) ([]oxide.Ins
 	if len(pubkey) > 0 {
 		pubkeys = append(pubkeys, string(pubkey))
 	}
-	cloudConfig, err := GenerateCloudConfig("agent", false, c.controlPlaneIP, joinToken, pubkeys)
+	cloudConfig, err := GenerateCloudConfigB64("agent", false, c.controlPlaneIP, joinToken, pubkeys)
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate cloud config: %w", err)
 	}
