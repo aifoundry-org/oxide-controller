@@ -132,16 +132,57 @@ func (c *Cluster) ensureClusterExists(ctx context.Context, timeoutMinutes int, e
 			return nil, fmt.Errorf("created 0 control plane nodes")
 		}
 		hostid := instances[0].Id
-		ipList, err := client.InstanceExternalIpList(ctx, oxide.InstanceExternalIpListParams{
-			Instance: oxide.NameOrId(hostid),
-		})
-		if err != nil {
-			return nil, fmt.Errorf("failed to get external IP list: %w", err)
+		// if the control plane node was not configured to have an external IP,
+		// attach the floating IP to start and use that is the externalIP
+		var (
+			externalIP  string
+			fipAttached bool
+		)
+		if c.controlPlaneSpec.ExternalIP {
+			log.Debugf("Control plane node %s has external IP, using that", hostid)
+			ipList, err := client.InstanceExternalIpList(ctx, oxide.InstanceExternalIpListParams{
+				Instance: oxide.NameOrId(hostid),
+			})
+			if err != nil {
+				return nil, fmt.Errorf("failed to get external IP list: %w", err)
+			}
+			if len(ipList.Items) < 1 {
+				return nil, fmt.Errorf("created control plane node has no external IP")
+			}
+			externalIP = ipList.Items[0].Ip
+		} else {
+			// attach the floating IP to the control plane node
+			log.Debugf("Control plane node %s does not have external IP, attaching and using floating IP", hostid)
+			// floating ip attachment sometimes just doesn't work right after we create the node,
+			// so give it a few retries
+			var (
+				maxTries          = 5
+				sleepBetweenTries = 3 * time.Second
+				attached          bool
+			)
+			for i := 0; i < maxTries; i++ {
+				time.Sleep(sleepBetweenTries)
+				if _, err = client.FloatingIpAttach(ctx, oxide.FloatingIpAttachParams{
+					FloatingIp: oxide.NameOrId(controlPlaneIP.Id),
+					Body: &oxide.FloatingIpAttach{
+						Kind:   oxide.FloatingIpParentKindInstance,
+						Parent: oxide.NameOrId(hostid),
+					},
+				}); err != nil {
+					log.Debugf("Failed to attach floating IP %v, retrying %d/%d", err, i+1, maxTries)
+					continue
+				}
+				log.Debug("Successfully attached floating IP")
+				attached = true
+				break
+			}
+			if !attached {
+				return nil, fmt.Errorf("failed to attach floating IP after %d tries, last error: %w", maxTries, err)
+			}
+			externalIP = controlPlaneIP.Ip
+			fipAttached = true
 		}
-		if len(ipList.Items) < 1 {
-			return nil, fmt.Errorf("created control plane node has no external IP")
-		}
-		externalIP := ipList.Items[0].Ip
+
 		// wait for the control plane node to be up and running
 		timeLeft := time.Duration(timeoutMinutes) * time.Minute
 		for {
@@ -158,15 +199,18 @@ func (c *Cluster) ensureClusterExists(ctx context.Context, timeoutMinutes int, e
 				return nil, fmt.Errorf("control plane at %s did not respond in time", externalIP)
 			}
 		}
-		// attach the floating IP to the control plane node
-		if _, err := client.FloatingIpAttach(ctx, oxide.FloatingIpAttachParams{
-			FloatingIp: oxide.NameOrId(controlPlaneIP.Id),
-			Body: &oxide.FloatingIpAttach{
-				Kind:   oxide.FloatingIpParentKindInstance,
-				Parent: oxide.NameOrId(hostid),
-			},
-		}); err != nil {
-			return nil, fmt.Errorf("failed to attach floating IP: %w", err)
+		// attach the floating IP to the control plane node, if not done already
+		if !fipAttached {
+			log.Debugf("Control plane node %s did not have floating IP attached, attaching", hostid)
+			if _, err := client.FloatingIpAttach(ctx, oxide.FloatingIpAttachParams{
+				FloatingIp: oxide.NameOrId(controlPlaneIP.Id),
+				Body: &oxide.FloatingIpAttach{
+					Kind:   oxide.FloatingIpParentKindInstance,
+					Parent: oxide.NameOrId(hostid),
+				},
+			}); err != nil {
+				return nil, fmt.Errorf("failed to attach floating IP: %w", err)
+			}
 		}
 
 		// get the join token and save it to our secrets map
