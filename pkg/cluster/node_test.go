@@ -43,7 +43,7 @@ runcmd:
   - |
     PRIVATE_IP=$(hostname -I | awk '{print $1}')
     PUBLIC_IP=$(curl -s https://ifconfig.me)
-    curl -sfL https://get.k3s.io | sh -s - server --tls-san 10.0.0.5 --node-external-ip 10.0.0.5 --tls-san ${PRIVATE_IP} --tls-san ${PUBLIC_IP}
+    curl -sfL https://get.k3s.io | sh -s - server --server https://10.0.0.5:6443 --token joinme --tls-san ${PRIVATE_IP} --tls-san ${PUBLIC_IP}
 users:
   - name: root
     shell: /bin/bash
@@ -58,12 +58,7 @@ runcmd:
   - |
     PRIVATE_IP=$(hostname -I | awk '{print $1}')
     PUBLIC_IP=$(curl -s https://ifconfig.me)
-    curl -sfL https://get.k3s.io | sh -s - server --tls-san 10.0.0.5 --node-external-ip 10.0.0.5 --tls-san ${PRIVATE_IP} --tls-san ${PUBLIC_IP}
-users:
-  - name: root
-    shell: /bin/bash
-    ssh-authorized-keys:
-      - somekey
+    curl -sfL https://get.k3s.io | sh -s - server --server https://10.0.0.5:6443 --token joinme --tls-san ${PRIVATE_IP} --tls-san ${PUBLIC_IP}
 ssh_pwauth: false
 disable_root: false
 allow_public_ssh_keys: true
