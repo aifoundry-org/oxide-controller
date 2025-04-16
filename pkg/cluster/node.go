@@ -158,7 +158,7 @@ func (c *Cluster) CreateControlPlaneNodes(ctx context.Context, initCluster bool,
 }
 
 // CreateWorkerNodes creates new worker nodes
-func (c *Cluster) CreateWorkerNodes(ctx context.Context, count int) ([]oxide.Instance, error) {
+func (c *Cluster) CreateWorkerNodes(ctx context.Context, count uint32) ([]oxide.Instance, error) {
 	var nodes []oxide.Instance
 	c.logger.Debugf("Creating %d worker nodes with prefix %s", count, c.prefix)
 	joinToken, err := c.GetJoinToken(ctx)
@@ -178,7 +178,7 @@ func (c *Cluster) CreateWorkerNodes(ctx context.Context, count int) ([]oxide.Ins
 		return nil, fmt.Errorf("failed to generate cloud config: %w", err)
 	}
 
-	for i := 0; i < count; i++ {
+	for i := 0; i < int(count); i++ {
 		workerName := fmt.Sprintf("worker-%d", time.Now().Unix())
 		instance, err := CreateInstance(ctx, c.client, c.projectID, workerName, c.workerSpec, cloudConfig)
 		if err != nil {
@@ -188,4 +188,15 @@ func (c *Cluster) CreateWorkerNodes(ctx context.Context, count int) ([]oxide.Ins
 	}
 	c.logger.Debugf("Created %d control plane nodes with prefix %s", count, c.prefix)
 	return nodes, nil
+}
+
+// ModifyWorkerNodeCount modifies the number of worker nodes in the cluster
+func (c *Cluster) ModifyWorkerNodeCount(count uint32) (uint32, error) {
+	c.workerCount.Store(count)
+	return c.workerCount.Load(), nil
+}
+
+// GetWorkerNodeCount gets the number of worker nodes in the cluster
+func (c *Cluster) GetWorkerNodeCount() (uint32, error) {
+	return c.workerCount.Load(), nil
 }

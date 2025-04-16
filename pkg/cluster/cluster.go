@@ -6,6 +6,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/aifoundry-org/oxide-controller/pkg/util"
@@ -19,8 +20,8 @@ type Cluster struct {
 	client                       *oxide.Client
 	projectID                    string
 	prefix                       string
-	controlPlaneCount            int
-	workerCount                  int
+	controlPlaneCount            atomic.Uint32
+	workerCount                  atomic.Uint32
 	controlPlaneSpec, workerSpec NodeSpec
 	secretName                   string
 	kubeconfig, userPubkey       []byte
@@ -28,20 +29,21 @@ type Cluster struct {
 }
 
 // New creates a new Cluster instance
-func New(logger *log.Entry, client *oxide.Client, projectID string, prefix string, controlPlaneCount, workerCount int, controlPlaneSpec, workerSpec NodeSpec, secretName string, kubeconfig, pubkey []byte) *Cluster {
-	return &Cluster{
-		logger:            logger.WithField("component", "cluster"),
-		client:            client,
-		projectID:         projectID,
-		prefix:            prefix,
-		controlPlaneCount: controlPlaneCount,
-		workerCount:       workerCount,
-		controlPlaneSpec:  controlPlaneSpec,
-		workerSpec:        workerSpec,
-		secretName:        secretName,
-		kubeconfig:        kubeconfig,
-		userPubkey:        pubkey,
+func New(logger *log.Entry, client *oxide.Client, projectID string, prefix string, controlPlaneCount, workerCount uint32, controlPlaneSpec, workerSpec NodeSpec, secretName string, kubeconfig, pubkey []byte) *Cluster {
+	c := &Cluster{
+		logger:           logger.WithField("component", "cluster"),
+		client:           client,
+		projectID:        projectID,
+		prefix:           prefix,
+		controlPlaneSpec: controlPlaneSpec,
+		workerSpec:       workerSpec,
+		secretName:       secretName,
+		kubeconfig:       kubeconfig,
+		userPubkey:       pubkey,
 	}
+	c.workerCount.Store(workerCount)
+	c.controlPlaneCount.Store(controlPlaneCount)
+	return c
 }
 
 // ensureClusterExists checks if a k3s cluster exists, and creates one if needed
@@ -50,7 +52,7 @@ func (c *Cluster) ensureClusterExists(ctx context.Context, timeoutMinutes int, e
 	client := c.client
 	projectID := c.projectID
 	controlPlanePrefix := c.prefix
-	controlPlaneCount := c.controlPlaneCount
+	controlPlaneCount := c.controlPlaneCount.Load()
 	secretName := c.secretName
 
 	c.logger.Debugf("Checking if %d control plane nodes exist with prefix %s", controlPlaneCount, controlPlanePrefix)
@@ -72,7 +74,7 @@ func (c *Cluster) ensureClusterExists(ctx context.Context, timeoutMinutes int, e
 	}
 
 	// if we have enough nodes, return
-	if len(controlPlaneNodes) >= controlPlaneCount {
+	if len(controlPlaneNodes) >= int(controlPlaneCount) {
 		return nil, nil
 	}
 
@@ -255,7 +257,7 @@ func (c *Cluster) ensureClusterExists(ctx context.Context, timeoutMinutes int, e
 
 	// the number we want is the next one
 	highest++
-	count := controlPlaneCount - len(controlPlaneNodes)
+	count := int(controlPlaneCount) - len(controlPlaneNodes)
 	c.logger.Debugf("control plane nodes %d, desired %d, creating %d", len(controlPlaneNodes), controlPlaneCount, count)
 
 	if _, err := c.CreateControlPlaneNodes(ctx, false, count, highest, nil); err != nil {

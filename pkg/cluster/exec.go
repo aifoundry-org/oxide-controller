@@ -7,7 +7,13 @@ import (
 	"github.com/aifoundry-org/oxide-controller/pkg/util"
 )
 
-func (c *Cluster) Initialize(ctx context.Context, timeoutMinutes int, kubeconfig []byte, kubeconfigOverwrite bool) (newKubeconfig []byte, err error) {
+// Execute execute the core functionality, which includes:
+// 1. Verifying the project exists
+// 2. Verifying the images exist
+// 3. Verifying the cluster exists
+// 4. Ensuring the worker nodes are created as desired
+// 5. Returning the new kubeconfig, if any
+func (c *Cluster) Execute(ctx context.Context, timeoutMinutes int, kubeconfig []byte, kubeconfigOverwrite bool) (newKubeconfig []byte, err error) {
 
 	projectID, err := ensureProjectExists(ctx, c.logger, c.client, c.projectID)
 	if err != nil {
@@ -37,7 +43,7 @@ func (c *Cluster) Initialize(ctx context.Context, timeoutMinutes int, kubeconfig
 	}
 
 	// ensure worker nodes as desired
-	if _, err := c.CreateWorkerNodes(ctx, c.workerCount); err != nil {
+	if _, err := c.CreateWorkerNodes(ctx, c.workerCount.Load()); err != nil {
 		return nil, fmt.Errorf("failed to create worker nodes: %v", err)
 	}
 	return newKubeconfig, nil

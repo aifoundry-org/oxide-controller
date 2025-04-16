@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/oxidecomputer/oxide.go/oxide"
 	log "github.com/sirupsen/logrus"
@@ -22,8 +24,8 @@ func rootCmd() (*cobra.Command, error) {
 		tokenFilePath           string
 		clusterProject          string
 		controlPlanePrefix      string
-		controlPlaneCount       int
-		workerCount             int
+		controlPlaneCount       uint32
+		workerCount             uint32
 		controlPlaneImageName   string
 		controlPlaneImageSource string
 		workerImageName         string
@@ -41,6 +43,8 @@ func rootCmd() (*cobra.Command, error) {
 		address                 string
 		workerExternalIP        bool
 		controlPlaneExternalIP  bool
+		controlLoopMins         int
+		runOnce                 bool
 
 		logger = log.New()
 	)
@@ -117,7 +121,10 @@ func rootCmd() (*cobra.Command, error) {
 			if kubeconfigExists {
 				kubeconfigToPass = kubeconfig
 			}
-			newKubeconfig, err := c.Initialize(ctx, clusterInitWait, kubeconfigToPass, kubeconfigOverwrite)
+			// we perform 2 execution loops of the cluster execute function:
+			// - the first one is to create the cluster and get the kubeconfig
+			// - the second one is to ensure the cluster is up and running
+			newKubeconfig, err := c.Execute(ctx, clusterInitWait, kubeconfigToPass, kubeconfigOverwrite)
 			if err != nil {
 				return fmt.Errorf("failed to initialize setup: %v", err)
 			}
@@ -128,10 +135,51 @@ func rootCmd() (*cobra.Command, error) {
 				}
 			}
 
-			// serve REST endpoints
-			logentry.Infof("Starting server on address %s", address)
-			s := server.New(address, logentry, oxideClient, c, controlPlaneSecret, clusterProject, controlPlanePrefix, workerImageName, int(workerMemory), int(workerCPU))
-			return s.Serve()
+			if runOnce {
+				logentry.Infof("Run once mode enabled, exiting after first run")
+				return nil
+			}
+
+			// start each control loop
+			var (
+				wg    sync.WaitGroup
+				errCh = make(chan error, 2) // buffered channel to hold up to 3 errors
+			)
+
+			// 1- cluster manager
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				controlLoopSleep := time.Duration(controlLoopMins) * time.Minute
+				for {
+					logentry.Debugf("Running control loop")
+					// we do not overwrite the kubeconfig file on future loops
+					if _, err := c.Execute(ctx, controlLoopMins, newKubeconfig, kubeconfigOverwrite); err != nil {
+						errCh <- fmt.Errorf("failed to run control loop: %v", err)
+					}
+					logentry.Debugf("Control loop complete, sleeping %s", controlLoopSleep)
+					time.Sleep(controlLoopSleep)
+				}
+			}()
+
+			// 2- API server
+			wg.Add(1)
+			go func() {
+				// serve REST endpoints
+				defer wg.Done()
+				logentry.Infof("Starting server on address %s", address)
+				s := server.New(address, logentry, oxideClient, c, controlPlaneSecret, clusterProject, controlPlanePrefix, workerImageName, int(workerMemory), int(workerCPU))
+				errCh <- s.Serve()
+			}()
+
+			wg.Wait()
+			close(errCh)
+			var errs []error
+			for err := range errCh {
+				errs = append(errs, err)
+			}
+			log.Info("all loops have finished")
+			return errors.Join(errs...)
 		},
 	}
 
@@ -140,13 +188,13 @@ func rootCmd() (*cobra.Command, error) {
 	cmd.Flags().StringVar(&tokenFilePath, "token-file", "/data/oxide_token", "Path to Oxide API token file")
 	cmd.Flags().StringVar(&clusterProject, "cluster-project", "ainekko-cluster", "Oxide project name for Kubernetes cluster")
 	cmd.Flags().StringVar(&controlPlanePrefix, "control-plane-prefix", "ainekko-control-plane-", "Prefix for control plane instances")
-	cmd.Flags().IntVar(&controlPlaneCount, "control-plane-count", 3, "Number of control plane instances to maintain")
+	cmd.Flags().Uint32Var(&controlPlaneCount, "control-plane-count", 3, "Number of control plane instances to maintain")
 	cmd.Flags().StringVar(&controlPlaneImageName, "control-plane-image-name", "debian-12-cloud", "Image to use for control plane instances")
 	cmd.Flags().StringVar(&controlPlaneImageSource, "control-plane-image-source", "https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-genericcloud-amd64.raw", "Image to use for control plane instances")
 	cmd.Flags().StringVar(&workerImageName, "worker-image-name", "debian-12-cloud", "Image to use for worker nodes")
 	cmd.Flags().StringVar(&workerImageSource, "worker-image-source", "https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-genericcloud-amd64.raw", "Image to use for worker instances")
 	cmd.Flags().Uint64Var(&controlPlaneMemory, "control-plane-memory", 4, "Memory to allocate to each control plane node, in GB")
-	cmd.Flags().IntVar(&workerCount, "worker-count", 0, "Number of worker instances to create on startup and maintain, until changed via API")
+	cmd.Flags().Uint32Var(&workerCount, "worker-count", 0, "Number of worker instances to create on startup and maintain, until changed via API")
 	cmd.Flags().Uint64Var(&workerMemory, "worker-memory", 16, "Memory to allocate to each worker node, in GB")
 	cmd.Flags().Uint16Var(&controlPlaneCPU, "control-plane-cpu", 2, "vCPU count to allocate to each control plane node")
 	cmd.Flags().Uint16Var(&workerCPU, "worker-cpu", 4, "vCPU count to allocate to each worker node")
@@ -159,6 +207,8 @@ func rootCmd() (*cobra.Command, error) {
 	cmd.Flags().BoolVar(&controlPlaneExternalIP, "control-plane-external-ip", true, "Whether or not to assign an ephemeral public IP to the control plane nodes, needed to access cluster from outside sled, as well as for debugging")
 	cmd.Flags().IntVarP(&verbose, "verbose", "v", 0, "set log level, 0 is info, 1 is debug, 2 is trace")
 	cmd.Flags().StringVar(&address, "address", ":8080", "Address to bind the server to")
+	cmd.Flags().BoolVar(&runOnce, "runonce", false, "Run the server once and then exit, do not run a long-running control loop for checking the controller or listening for API calls")
+	cmd.Flags().IntVar(&controlLoopMins, "control-loop-mins", 5, "How often to run the control loop, in minutes")
 
 	return cmd, nil
 }
