@@ -1,9 +1,13 @@
 package server
 
 import (
+	"fmt"
+	"io"
 	"net/http"
+	"strconv"
 
 	"github.com/aifoundry-org/oxide-controller/pkg/cluster"
+	"github.com/gorilla/mux"
 
 	"github.com/oxidecomputer/oxide.go/oxide"
 	log "github.com/sirupsen/logrus"
@@ -39,26 +43,72 @@ func New(address string, logger *log.Entry, oxideClient *oxide.Client, cluster *
 
 func (s *Server) Serve() error {
 	// Define API routes
-	http.HandleFunc("/nodes/add", s.handleAddNode)
+	r := mux.NewRouter()
+	r.HandleFunc("/nodes/workers/modify", s.handleModifyNode).Methods("POST")
+	r.HandleFunc("/nodes/workers", s.handleGetNodeCount).Methods("GET")
 
 	// Start HTTP server
 	s.logger.Infof("API listening on %s", s.address)
 	return http.ListenAndServe(s.address, nil)
 }
 
-// handleAddNode creates a new worker node
-func (s *Server) handleAddNode(w http.ResponseWriter, r *http.Request) {
-	s.logger.Debug("Processing request to add a worker node...")
-	ctx := r.Context()
+// handleModifyNode modifies worker node count
+func (s *Server) handleModifyNode(w http.ResponseWriter, r *http.Request) {
+	s.logger.Debug("Processing request to modify worker node count...")
+	countB, err := io.ReadAll(r.Body)
+	if err != nil {
+		s.logger.Debugf("Failed to read request body: %v", err)
+		http.Error(w, "Bad Request", http.StatusBadRequest)
+		return
+	}
+	count, err := strconv.Atoi(string(countB))
+	if err != nil {
+		s.logger.Debugf("Failed to convert request body to int: %v", err)
+		http.Error(w, "Bad Request", http.StatusBadRequest)
+		return
+	}
+	if count < 0 {
+		s.logger.Debug("Worker node count cannot be negative")
+		http.Error(w, "Bad Request", http.StatusBadRequest)
+		return
+	}
+	if count > int(^uint32(0)) {
+		s.logger.Debug("Worker node count is too large")
+		http.Error(w, "Bad Request", http.StatusBadRequest)
+		return
+	}
 
-	instances, err := s.cluster.CreateWorkerNodes(ctx, 1)
-	if err != nil || len(instances) < 1 {
-		s.logger.Debugf("Failed to create worker nodes: %v", err)
+	existingCount, err := s.cluster.GetWorkerNodeCount()
+	if err != nil {
+		s.logger.Debugf("Failed to get existing worker node count: %v", err)
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		return
 	}
 
-	s.logger.Debugf("Worker node %s created successfully", instances[0].Name)
+	newCount, err := s.cluster.ModifyWorkerNodeCount(uint32(count))
+	if err != nil {
+		s.logger.Debugf("Failed to change worker node count: %v", err)
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		return
+	}
+
+	s.logger.Debugf("Worker node count modified modified successfully to: %d", newCount)
 	w.WriteHeader(http.StatusCreated)
-	w.Write([]byte("Worker node added"))
+	w.Write(fmt.Appendf(nil, "Worker count changed from %d to %d", existingCount, newCount))
+}
+
+// handleGetNodeCount gets worker node count
+func (s *Server) handleGetNodeCount(w http.ResponseWriter, r *http.Request) {
+	s.logger.Debug("Processing request to get worker node count...")
+
+	count, err := s.cluster.GetWorkerNodeCount()
+	if err != nil {
+		s.logger.Debugf("Failed to get worker node count: %v", err)
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		return
+	}
+
+	s.logger.Debugf("Worker node count retrieved: %d", count)
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte(strconv.Itoa(int(count))))
 }

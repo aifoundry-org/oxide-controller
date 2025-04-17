@@ -1,9 +1,9 @@
 # oxide-controller
 
-This is the server that controls the Ainekko stack deployment on an Oxide sled. It serves two purposes:
+This is the server that controls the Ainekko stack deployment on an Oxide sled. It serves these purposes:
 
-1. It provides a REST API for the Ainekko stack, to enable users to interact with the sled, adding or removing VMs to act as workers.
-1. It provides a loop that checks the state of the cluster and keeps it alive.
+1. It ensures a Kubernetes cluster is running on the sled, providing a loop that checks the state of the cluster and keeps it alive.
+1. It provides a REST API for the Ainekko stack, to enable users to interact with the sled, changing the worker VM count.
 
 This can run standalone on your own device, in a VM, or inside the Kubernetes cluster itself.
 
@@ -14,6 +14,18 @@ The production-recommended way to run this is:
 1. Run this locally, pointing to the Oxide sled, which will cause a 3-node kubernetes cluster to be deployed.
 1. Stop running this locally, deploy it as a `StatefulSet` of 1 replica in the Kubernetes cluster.
 1. Profit!
+
+In the future, the oxide-controller will pivot automatically to deploying itself on the cluster
+and shutting down the local instance.
+
+## REST API
+
+The REST API is fairly simple, with the following endpoints:
+
+- `GET /nodes/workers` - get the targeted count of worker nodes
+- `POST /nodes/workers/modify` - modify the targeted count of worker nodes. Content-Type should be `application/text`, body should just be the new count.
+
+## ssh Keys
 
 The oxide-controller uses two ssh keys:
 
