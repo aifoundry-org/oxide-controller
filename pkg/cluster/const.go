@@ -11,4 +11,5 @@ const (
 	secretKeyJoinToken        = "k3s-join-token"
 	secretKeySystemSSHPublic  = "system-ssh-public-key"
 	secretKeySystemSSHPrivate = "system-ssh-private-key"
+	secretKeyWorkerCount      = "worker-count"
 )

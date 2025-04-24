@@ -11,9 +11,9 @@ import (
 // 1. Verifying the project exists
 // 2. Verifying the images exist
 // 3. Verifying the cluster exists
-// 4. Ensuring the worker nodes are created as desired
+// 4. Ensuring the worker nodes exist as desired
 // 5. Returning the new kubeconfig, if any
-func (c *Cluster) Execute(ctx context.Context, timeoutMinutes int, kubeconfig []byte, kubeconfigOverwrite bool) (newKubeconfig []byte, err error) {
+func (c *Cluster) Execute(ctx context.Context) (newKubeconfig []byte, err error) {
 
 	projectID, err := ensureProjectExists(ctx, c.logger, c.client, c.projectID)
 	if err != nil {
@@ -37,13 +37,13 @@ func (c *Cluster) Execute(ctx context.Context, timeoutMinutes int, kubeconfig []
 	c.workerSpec.Image = images[1]
 	c.workerSpec.DiskSize = util.RoundUp(images[0].Size, GB)
 
-	newKubeconfig, err = c.ensureClusterExists(ctx, timeoutMinutes, kubeconfig, kubeconfigOverwrite)
+	newKubeconfig, err = c.ensureClusterExists(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("cluster verification failed: %v", err)
 	}
 
 	// ensure worker nodes as desired
-	if _, err := c.CreateWorkerNodes(ctx, c.workerCount.Load()); err != nil {
+	if _, err := c.EnsureWorkerNodes(ctx); err != nil {
 		return nil, fmt.Errorf("failed to create worker nodes: %v", err)
 	}
 	return newKubeconfig, nil

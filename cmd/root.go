@@ -24,8 +24,9 @@ func rootCmd() (*cobra.Command, error) {
 		tokenFilePath           string
 		clusterProject          string
 		controlPlanePrefix      string
-		controlPlaneCount       uint32
-		workerCount             uint32
+		workerPrefix            string
+		controlPlaneCount       uint
+		workerCount             uint
 		controlPlaneImageName   string
 		controlPlaneImageSource string
 		workerImageName         string
@@ -82,13 +83,9 @@ func rootCmd() (*cobra.Command, error) {
 			}
 
 			logentry.Debugf("Loading kubeconfig from %s", kubeconfigPath)
-			var kubeconfigExists bool
 			kubeconfig, err := util.LoadFile(kubeconfigPath)
 			if err != nil && !errors.Is(err, os.ErrNotExist) {
 				return fmt.Errorf("failed to load kubeconfig at %s: %w", kubeconfigPath, err)
-			}
-			if err == nil {
-				kubeconfigExists = true
 			}
 
 			logentry.Debugf("Loading Oxide token from %s", tokenFilePath)
@@ -111,20 +108,17 @@ func rootCmd() (*cobra.Command, error) {
 			ctx := context.Background()
 
 			c := cluster.New(logentry, oxideClient, clusterProject,
-				controlPlanePrefix, controlPlaneCount, workerCount,
+				controlPlanePrefix, workerPrefix, int(controlPlaneCount), int(workerCount),
 				cluster.NodeSpec{Image: cluster.Image{Name: controlPlaneImageName, Source: controlPlaneImageSource}, MemoryGB: int(controlPlaneMemory), CPUCount: int(controlPlaneCPU), ExternalIP: controlPlaneExternalIP},
 				cluster.NodeSpec{Image: cluster.Image{Name: workerImageName, Source: workerImageSource}, MemoryGB: int(workerMemory), CPUCount: int(workerCPU), ExternalIP: workerExternalIP},
 				controlPlaneSecret, kubeconfig, pubkey,
+				time.Duration(clusterInitWait)*time.Minute,
+				kubeconfigOverwrite,
 			)
-			logentry.Debugf("Ensuring project exists: %s", clusterProject)
-			var kubeconfigToPass []byte
-			if kubeconfigExists {
-				kubeconfigToPass = kubeconfig
-			}
 			// we perform 2 execution loops of the cluster execute function:
 			// - the first one is to create the cluster and get the kubeconfig
 			// - the second one is to ensure the cluster is up and running
-			newKubeconfig, err := c.Execute(ctx, clusterInitWait, kubeconfigToPass, kubeconfigOverwrite)
+			newKubeconfig, err := c.Execute(ctx)
 			if err != nil {
 				return fmt.Errorf("failed to initialize setup: %v", err)
 			}
@@ -154,7 +148,7 @@ func rootCmd() (*cobra.Command, error) {
 				for {
 					logentry.Debugf("Running control loop")
 					// we do not overwrite the kubeconfig file on future loops
-					if _, err := c.Execute(ctx, controlLoopMins, newKubeconfig, kubeconfigOverwrite); err != nil {
+					if _, err := c.Execute(ctx); err != nil {
 						errCh <- fmt.Errorf("failed to run control loop: %v", err)
 					}
 					logentry.Debugf("Control loop complete, sleeping %s", controlLoopSleep)
@@ -188,13 +182,14 @@ func rootCmd() (*cobra.Command, error) {
 	cmd.Flags().StringVar(&tokenFilePath, "token-file", "/data/oxide_token", "Path to Oxide API token file")
 	cmd.Flags().StringVar(&clusterProject, "cluster-project", "ainekko-cluster", "Oxide project name for Kubernetes cluster")
 	cmd.Flags().StringVar(&controlPlanePrefix, "control-plane-prefix", "ainekko-control-plane-", "Prefix for control plane instances")
-	cmd.Flags().Uint32Var(&controlPlaneCount, "control-plane-count", 3, "Number of control plane instances to maintain")
+	cmd.Flags().StringVar(&workerPrefix, "worker-prefix", "ainekko-worker-", "Prefix for worker instances")
+	cmd.Flags().UintVar(&controlPlaneCount, "control-plane-count", 3, "Number of control plane instances to maintain")
 	cmd.Flags().StringVar(&controlPlaneImageName, "control-plane-image-name", "debian-12-cloud", "Image to use for control plane instances")
 	cmd.Flags().StringVar(&controlPlaneImageSource, "control-plane-image-source", "https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-genericcloud-amd64.raw", "Image to use for control plane instances")
 	cmd.Flags().StringVar(&workerImageName, "worker-image-name", "debian-12-cloud", "Image to use for worker nodes")
 	cmd.Flags().StringVar(&workerImageSource, "worker-image-source", "https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-genericcloud-amd64.raw", "Image to use for worker instances")
 	cmd.Flags().Uint64Var(&controlPlaneMemory, "control-plane-memory", 4, "Memory to allocate to each control plane node, in GB")
-	cmd.Flags().Uint32Var(&workerCount, "worker-count", 0, "Number of worker instances to create on startup and maintain, until changed via API")
+	cmd.Flags().UintVar(&workerCount, "worker-count", 0, "Number of worker instances to create on startup and maintain, until changed via API")
 	cmd.Flags().Uint64Var(&workerMemory, "worker-memory", 16, "Memory to allocate to each worker node, in GB")
 	cmd.Flags().Uint16Var(&controlPlaneCPU, "control-plane-cpu", 2, "vCPU count to allocate to each control plane node")
 	cmd.Flags().Uint16Var(&workerCPU, "worker-cpu", 4, "vCPU count to allocate to each worker node")
