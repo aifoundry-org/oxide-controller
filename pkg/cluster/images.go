@@ -12,6 +12,10 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
+const (
+	reportingIncrement = 100 * 1024 * 1024 // 100MB
+)
+
 // ensureImagesExist checks if the right images exist and creates them if needed
 // they can exist at the silo or project level. However, if they do not exist, then they
 // will be created at the project level.
@@ -90,6 +94,7 @@ func ensureImagesExist(ctx context.Context, logger *log.Entry, client *oxide.Cli
 			return nil, fmt.Errorf("failed to create temporary file: %w", err)
 		}
 		defer os.RemoveAll(file.Name())
+		logger.Debugf("Creating image %s, downloading to %s", missingImage.Name, file.Name())
 		if err := util.DownloadFile(file.Name(), missingImage.Source); err != nil {
 			return nil, fmt.Errorf("failed to download image: %w", err)
 		}
@@ -101,13 +106,14 @@ func ensureImagesExist(ctx context.Context, logger *log.Entry, client *oxide.Cli
 		if size == 0 {
 			return nil, fmt.Errorf("image file is empty")
 		}
-		size = util.RoundUp(size, GB)
+		diskSize := util.RoundUp(size, GB)
+		logger.Debugf("Uploading image %s, from %s, size %d, rounding up to nearest GB %d", missingImage.Name, file.Name(), size, diskSize)
 		// create the disk
 		disk, err := client.DiskCreate(ctx, oxide.DiskCreateParams{
 			Project: oxide.NameOrId(projectID),
 			Body: &oxide.DiskCreate{
 				Description: fmt.Sprintf("Disk for image '%s'", missingImage.Name),
-				Size:        oxide.ByteCount(size),
+				Size:        oxide.ByteCount(diskSize),
 				Name:        oxide.Name(missingImage.Name),
 				DiskSource: oxide.DiskSource{
 					Type:      oxide.DiskSourceTypeImportingBlocks,
@@ -130,7 +136,7 @@ func ensureImagesExist(ctx context.Context, logger *log.Entry, client *oxide.Cli
 			return nil, fmt.Errorf("failed to open file: %w", err)
 		}
 		defer f.Close()
-		var offset int
+		var offset, lastReport int
 		for {
 			buf := make([]byte, MB/2)
 			n, err := f.Read(buf)
@@ -151,6 +157,11 @@ func ensureImagesExist(ctx context.Context, logger *log.Entry, client *oxide.Cli
 				return nil, fmt.Errorf("failed to write data: %w", err)
 			}
 			offset += n
+
+			if offset-lastReport > reportingIncrement {
+				logger.Debugf("Uploaded %d bytes of %d bytes", offset, size)
+				lastReport = offset
+			}
 		}
 		if err := client.DiskBulkWriteImportStop(ctx, oxide.DiskBulkWriteImportStopParams{
 			Disk: oxide.NameOrId(disk.Id),
