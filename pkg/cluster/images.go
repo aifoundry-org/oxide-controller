@@ -117,7 +117,7 @@ func ensureImagesExist(ctx context.Context, logger *log.Entry, client *oxide.Cli
 				Name:        oxide.Name(missingImage.Name),
 				DiskSource: oxide.DiskSource{
 					Type:      oxide.DiskSourceTypeImportingBlocks,
-					BlockSize: blockSize, // TODO: Must be multiple of image size. Verify?
+					BlockSize: oxide.BlockSize(missingImage.Blocksize), // TODO: Must be multiple of image size. Verify?
 				},
 			},
 		})
@@ -158,17 +158,19 @@ func ensureImagesExist(ctx context.Context, logger *log.Entry, client *oxide.Cli
 			}
 			offset += n
 
-			if offset-lastReport > reportingIncrement {
+			if offset-lastReport >= reportingIncrement {
 				logger.Debugf("Uploaded %d bytes of %d bytes", offset, size)
 				lastReport = offset
 			}
 		}
+		log.Debugf("Upload complete, wrote %d bytes of %d bytes", offset, size)
 		if err := client.DiskBulkWriteImportStop(ctx, oxide.DiskBulkWriteImportStopParams{
 			Disk: oxide.NameOrId(disk.Id),
 		}); err != nil {
 			return nil, fmt.Errorf("failed to stop bulk write import: %w", err)
 		}
 		// finalize the import
+		log.Debugf("Finalizing import, creating snapshot %s", snapshotName)
 		if err := client.DiskFinalizeImport(ctx, oxide.DiskFinalizeImportParams{
 			Disk: oxide.NameOrId(disk.Id),
 			Body: &oxide.FinalizeDisk{
@@ -178,6 +180,7 @@ func ensureImagesExist(ctx context.Context, logger *log.Entry, client *oxide.Cli
 			return nil, fmt.Errorf("failed to finalize import: %w", err)
 		}
 
+		log.Debugf("Deleting disk %s", disk.Id)
 		client.DiskDelete(ctx, oxide.DiskDeleteParams{
 			Disk: oxide.NameOrId(disk.Id),
 		})
@@ -190,6 +193,7 @@ func ensureImagesExist(ctx context.Context, logger *log.Entry, client *oxide.Cli
 			return nil, fmt.Errorf("failed to find snapshot: %w", err)
 		}
 
+		log.Debugf("Creating image from snapshot %s", snapshot.Id)
 		image, err := client.ImageCreate(ctx, oxide.ImageCreateParams{
 			Project: oxide.NameOrId(projectID),
 			Body: &oxide.ImageCreate{
@@ -204,6 +208,7 @@ func ensureImagesExist(ctx context.Context, logger *log.Entry, client *oxide.Cli
 		if err != nil {
 			return nil, fmt.Errorf("failed to create image: %w", err)
 		}
+		log.Debugf("Image ready %s %s", image.Name, image.Id)
 		imageMap[missingImage.Name] = image
 		idMap[missingImage.Name] = image
 	}

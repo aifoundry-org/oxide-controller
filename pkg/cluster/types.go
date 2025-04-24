@@ -10,8 +10,9 @@ type NodeSpec struct {
 }
 
 type Image struct {
-	Name   string `json:"name"`
-	Source string `json:"source"`
-	ID     string `json:"id"`
-	Size   int    `json:"size"`
+	Name      string `json:"name"`
+	Source    string `json:"source"`
+	Blocksize int    `json:"blocksize"`
+	ID        string `json:"id"`
+	Size      int    `json:"size"`
 }
