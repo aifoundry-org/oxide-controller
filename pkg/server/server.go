@@ -49,11 +49,12 @@ func (s *Server) Serve() error {
 
 	// Start HTTP server
 	s.logger.Infof("API listening on %s", s.address)
-	return http.ListenAndServe(s.address, nil)
+	return http.ListenAndServe(s.address, r)
 }
 
 // handleModifyNode modifies worker node count
 func (s *Server) handleModifyNode(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
 	s.logger.Debug("Processing request to modify worker node count...")
 	countB, err := io.ReadAll(r.Body)
 	if err != nil {
@@ -78,23 +79,22 @@ func (s *Server) handleModifyNode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	existingCount, err := s.cluster.GetWorkerNodeCount()
+	existingCount, err := s.cluster.GetWorkerCount(ctx)
 	if err != nil {
 		s.logger.Debugf("Failed to get existing worker node count: %v", err)
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		return
 	}
 
-	newCount, err := s.cluster.ModifyWorkerNodeCount(uint32(count))
-	if err != nil {
+	if err := s.cluster.SetWorkerCount(ctx, count); err != nil {
 		s.logger.Debugf("Failed to change worker node count: %v", err)
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		return
 	}
 
-	s.logger.Debugf("Worker node count modified modified successfully to: %d", newCount)
+	s.logger.Debugf("Worker node count modified modified successfully to: %d", count)
 	w.WriteHeader(http.StatusCreated)
-	w.Write(fmt.Appendf(nil, "Worker count changed from %d to %d", existingCount, newCount))
+	w.Write(fmt.Appendf(nil, "Worker count changed from %d to %d", existingCount, count))
 }
 
 // handleGetNodeCount gets worker node count

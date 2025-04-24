@@ -22,8 +22,8 @@ func ensureProjectExists(ctx context.Context, logger *log.Entry, client *oxide.C
 
 	var projectID string
 	for _, project := range projects.Items {
-		logger.Tracef("Checking project %s vs desired %s", project.Name, projectName)
-		if string(project.Name) == projectName {
+		logger.Tracef("Checking project %s %s vs desired %s", project.Name, project.Id, projectName)
+		if string(project.Name) == projectName || project.Id == projectName {
 			logger.Infof("Cluster project '%s' exists.", projectName)
 			projectID = project.Id
 			logger.Infof("Using project '%s' with ID '%s'", projectName, projectID)

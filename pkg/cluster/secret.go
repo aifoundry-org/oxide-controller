@@ -3,6 +3,7 @@ package cluster
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 
 	log "github.com/sirupsen/logrus"
@@ -45,6 +46,37 @@ func (c *Cluster) GetUserSSHPublicKey(ctx context.Context) ([]byte, error) {
 		return nil, err
 	}
 	return pubkey, nil
+}
+
+// GetWorkerCount retrieves the targeted worker count from the Kubernetes cluster
+func (c *Cluster) GetWorkerCount(ctx context.Context) (int, error) {
+	workerCount, err := getSecretValue(ctx, c.logger, c.kubeconfig, c.secretName, secretKeyWorkerCount)
+	if err != nil {
+		return 0, err
+	}
+	// convert to string
+	valStr := string(workerCount)
+	// remove trailing newlines
+	valStr = strings.TrimSuffix(valStr, "\n")
+	// convert to int
+	count, err := strconv.Atoi(valStr)
+	if err != nil {
+		return 0, fmt.Errorf("failed to convert worker count to int: %w", err)
+	}
+	return count, nil
+}
+
+// SetWorkerCount sets the targeted worker count in the Kubernetes cluster
+func (c *Cluster) SetWorkerCount(ctx context.Context, count int) error {
+	secretMap, err := getSecret(ctx, c.logger, c.kubeconfig, c.secretName)
+	if err != nil {
+		return fmt.Errorf("failed to get secret: %w", err)
+	}
+	secretMap[secretKeyWorkerCount] = []byte(fmt.Sprintf("%d", count))
+	if err := saveSecret(ctx, c.logger, c.secretName, c.kubeconfig, secretMap); err != nil {
+		return fmt.Errorf("failed to save secret: %w", err)
+	}
+	return nil
 }
 
 // getSecret gets the secret with all of our important information

@@ -6,7 +6,6 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
-	"sync/atomic"
 	"time"
 
 	"github.com/aifoundry-org/oxide-controller/pkg/util"
@@ -16,12 +15,16 @@ import (
 )
 
 type Cluster struct {
-	logger                       *log.Entry
-	client                       *oxide.Client
-	projectID                    string
-	prefix                       string
-	controlPlaneCount            atomic.Uint32
-	workerCount                  atomic.Uint32
+	logger              *log.Entry
+	client              *oxide.Client
+	projectID           string
+	controlPlanePrefix  string
+	workerPrefix        string
+	controlPlaneCount   int
+	clusterInitWait     time.Duration
+	kubeconfigOverwrite bool
+	// workerCount per the CLI flags; once cluster is up and running, relies solely on amount stored in secret
+	workerCount                  int
 	controlPlaneSpec, workerSpec NodeSpec
 	secretName                   string
 	kubeconfig, userPubkey       []byte
@@ -29,31 +32,45 @@ type Cluster struct {
 }
 
 // New creates a new Cluster instance
-func New(logger *log.Entry, client *oxide.Client, projectID string, prefix string, controlPlaneCount, workerCount uint32, controlPlaneSpec, workerSpec NodeSpec, secretName string, kubeconfig, pubkey []byte) *Cluster {
+func New(logger *log.Entry, client *oxide.Client, projectID string, controlPlanePrefix, workerPrefix string, controlPlaneCount, workerCount int, controlPlaneSpec, workerSpec NodeSpec, secretName string, kubeconfig, pubkey []byte, clusterInitWait time.Duration, kubeconfigOverwrite bool) *Cluster {
 	c := &Cluster{
-		logger:           logger.WithField("component", "cluster"),
-		client:           client,
-		projectID:        projectID,
-		prefix:           prefix,
-		controlPlaneSpec: controlPlaneSpec,
-		workerSpec:       workerSpec,
-		secretName:       secretName,
-		kubeconfig:       kubeconfig,
-		userPubkey:       pubkey,
+		logger:              logger.WithField("component", "cluster"),
+		client:              client,
+		projectID:           projectID,
+		controlPlanePrefix:  controlPlanePrefix,
+		workerPrefix:        workerPrefix,
+		controlPlaneSpec:    controlPlaneSpec,
+		workerSpec:          workerSpec,
+		secretName:          secretName,
+		kubeconfig:          kubeconfig,
+		userPubkey:          pubkey,
+		clusterInitWait:     clusterInitWait,
+		kubeconfigOverwrite: kubeconfigOverwrite,
 	}
-	c.workerCount.Store(workerCount)
-	c.controlPlaneCount.Store(controlPlaneCount)
+	c.workerCount = workerCount
+	c.controlPlaneCount = controlPlaneCount
 	return c
 }
 
 // ensureClusterExists checks if a k3s cluster exists, and creates one if needed
-func (c *Cluster) ensureClusterExists(ctx context.Context, timeoutMinutes int, existingKubeconfig []byte, kubeconfigOverwrite bool) (newKubeconfig []byte, err error) {
+func (c *Cluster) ensureClusterExists(ctx context.Context) (newKubeconfig []byte, err error) {
 	// local vars just for convenience
 	client := c.client
 	projectID := c.projectID
-	controlPlanePrefix := c.prefix
-	controlPlaneCount := c.controlPlaneCount.Load()
+	controlPlanePrefix := c.controlPlanePrefix
+	controlPlaneCount := c.controlPlaneCount
 	secretName := c.secretName
+	existingKubeconfig := c.kubeconfig
+
+	c.logger.Debugf("Checking if control plane IP %s exists", controlPlanePrefix)
+	controlPlaneIP, err := c.ensureControlPlaneIP(ctx, controlPlanePrefix)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get control plane IP: %w", err)
+	}
+
+	if c.controlPlaneIP == "" {
+		c.controlPlaneIP = controlPlaneIP.Ip
+	}
 
 	c.logger.Debugf("Checking if %d control plane nodes exist with prefix %s", controlPlaneCount, controlPlanePrefix)
 
@@ -83,18 +100,9 @@ func (c *Cluster) ensureClusterExists(ctx context.Context, timeoutMinutes int, e
 		// TODO: check to see if it can access the cluster
 	}
 
-	if len(controlPlaneNodes) == 0 && len(existingKubeconfig) > 0 && !kubeconfigOverwrite {
+	if len(controlPlaneNodes) == 0 && len(existingKubeconfig) > 0 && !c.kubeconfigOverwrite {
 		c.logger.Debugf("Found no control plane nodes, but kubeconfig already exists")
 		return nil, fmt.Errorf("kubeconfig already exists but cluster does not")
-	}
-
-	controlPlaneIP, err := c.ensureControlPlaneIP(ctx, controlPlanePrefix)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get control plane IP: %w", err)
-	}
-
-	if c.controlPlaneIP == "" {
-		c.controlPlaneIP = controlPlaneIP.Ip
 	}
 
 	// find highest number control plane node
@@ -188,7 +196,7 @@ func (c *Cluster) ensureClusterExists(ctx context.Context, timeoutMinutes int, e
 		}
 
 		// wait for the control plane node to be up and running
-		timeLeft := time.Duration(timeoutMinutes) * time.Minute
+		timeLeft := c.clusterInitWait
 		for {
 			c.logger.Infof("Waiting %s for control plane node %s to be up and running...", timeLeft, controlPlaneIP)
 			sleepTime := 1 * time.Minute
@@ -245,6 +253,11 @@ func (c *Cluster) ensureClusterExists(ctx context.Context, timeoutMinutes int, e
 		re := regexp.MustCompile(`(server:\s*\w+://)(\d+\.\d+\.\d+\.\d+)(:\d+)`)
 		kubeconfigString = re.ReplaceAllString(kubeconfigString, fmt.Sprintf("${1}%s${3}", controlPlaneIP.Ip))
 		c.kubeconfig = []byte(kubeconfigString)
+
+		// if we have worker node count explicitly defined, save it
+		if c.workerCount > 0 {
+			secrets[secretKeyWorkerCount] = []byte(fmt.Sprintf("%d", c.workerCount))
+		}
 
 		// save the join token, system ssh key pair, user ssh key to the Kubernetes secret
 		c.logger.Debugf("Saving secret %s to Kubernetes", secretName)
