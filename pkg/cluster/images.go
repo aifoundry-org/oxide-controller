@@ -39,18 +39,29 @@ func ensureImagesExist(ctx context.Context, logger *log.Entry, client *oxide.Cli
 	logger.Debugf("total global images %d", len(globalImages))
 	var (
 		missingImages   []Image
+		uniqueImages    []Image
+		targetImagesMap = make(map[string]Image)
 		projectImageMap = make(map[string]*oxide.Image)
 		globalImageMap  = make(map[string]*oxide.Image)
 		imageMap        = make(map[string]*oxide.Image)
 		idMap           = make(map[string]*oxide.Image)
 	)
+	// make sure each target image is unique
+	for _, image := range images {
+		targetImagesMap[image.Name] = image
+	}
+	for _, image := range targetImagesMap {
+		uniqueImages = append(uniqueImages, image)
+	}
+
+	// get map of project and global images
 	for _, image := range projectImages {
 		projectImageMap[string(image.Name)] = &image
 	}
 	for _, image := range globalImages {
 		globalImageMap[string(image.Name)] = &image
 	}
-	for i := range images {
+	for i := range uniqueImages {
 		if image, ok := projectImageMap[images[i].Name]; ok {
 			logger.Infof("Image %s found in project images", images[i].Name)
 			name := images[i].Name
