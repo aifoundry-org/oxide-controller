@@ -24,7 +24,7 @@ func (c *Cluster) Execute(ctx context.Context) (newKubeconfig []byte, err error)
 		c.logger.Infof("Using project ID: %s", c.projectID)
 	}
 
-	images, err := ensureImagesExist(ctx, c.logger, c.client, c.projectID, c.controlPlaneSpec.Image, c.workerSpec.Image)
+	images, err := ensureImagesExist(ctx, c.logger, c.client, c.projectID, c.imageParallelism, c.controlPlaneSpec.Image, c.workerSpec.Image)
 	if err != nil {
 		return nil, fmt.Errorf("image verification failed: %v", err)
 	}

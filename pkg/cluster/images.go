@@ -3,9 +3,12 @@ package cluster
 import (
 	"context"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"io"
 	"os"
+
+	"golang.org/x/sync/errgroup"
 
 	"github.com/aifoundry-org/oxide-controller/pkg/util"
 	"github.com/oxidecomputer/oxide.go/oxide"
@@ -21,7 +24,7 @@ const (
 // will be created at the project level.
 // The returned images will have their IDs set. It will have the exact same number of images as in the argument images.
 // This is not a member function of Cluster, as it can be self-contained and therefore tested.
-func ensureImagesExist(ctx context.Context, logger *log.Entry, client *oxide.Client, projectID string, images ...Image) ([]Image, error) {
+func ensureImagesExist(ctx context.Context, logger *log.Entry, client *oxide.Client, projectID string, parallelism int, images ...Image) ([]Image, error) {
 	// TODO: We don't need to list images, we can `View` them by name -
 	//       `images` array is never long, few more requests shouldn't harm.
 	// TODO: Do we need pagination? Using arbitrary limit for now.
@@ -173,39 +176,76 @@ func ensureImagesExist(ctx context.Context, logger *log.Entry, client *oxide.Cli
 			return nil, fmt.Errorf("failed to open file: %w", err)
 		}
 		defer f.Close()
-		var offset, lastReport int
-		// each read size must be a multiple of the block size,
-		// base64 adds 4/3 overhead, and we may have a maximum per-chunk
-		// upload size. So we read no more than 3/4 of the maximum per-chunk
-		// upload size, and round it down to the nearest block size.
-		maximumReadSize := maximumChunkSize * 3 / 4
-		adjustedReadSize := maximumReadSize - (maximumReadSize % int(missingImage.Blocksize))
-		for {
-			buf := make([]byte, adjustedReadSize)
-			n, err := f.Read(buf)
-			if err != nil && err != io.EOF {
-				return nil, fmt.Errorf("failed to read file: %w", err)
+		var offset int
+		// we can parallelize this, which should make it a lot faster
+		// we will try 10 parallel uploads
+		var (
+			totalBlocks        int64 = size / int64(missingImage.Blocksize)
+			baseBlocksPerChunk       = totalBlocks / int64(parallelism)
+			parallelSize       int64 = baseBlocksPerChunk * int64(missingImage.Blocksize)
+			extraBlocks              = totalBlocks % int64(parallelism)
+			extraSize          int64 = extraBlocks * int64(missingImage.Blocksize)
+		)
+		errg, errctx := errgroup.WithContext(context.Background())
+		logger.Debugf("Uploading %d bytes in %d threads of %d bytes", size, parallelism, parallelSize)
+		for i := range parallelism {
+			// next vars are because of closure issues
+			pos := int64(i)
+			chunkSize := parallelSize
+			// last chunk gets the extra blocks
+			if i == parallelism-1 {
+				chunkSize += extraSize
 			}
-			if n == 0 {
-				break
-			}
-			// convert the read data into base64. Why? because that is what oxide wants
-			if err := client.DiskBulkWriteImport(ctx, oxide.DiskBulkWriteImportParams{
-				Disk: oxide.NameOrId(disk.Id),
-				Body: &oxide.ImportBlocksBulkWrite{
-					Base64EncodedData: base64.StdEncoding.EncodeToString(buf[:n]),
-					Offset:            &offset,
-				},
-			}); err != nil {
-				return nil, fmt.Errorf("failed to write data: %w", err)
-			}
-			offset += n
+			logger := logger.WithField("chunk", i)
 
-			if offset-lastReport >= reportingIncrement {
-				logger.Debugf("Uploaded %d bytes of %d bytes", offset, size)
-				lastReport = offset
-			}
+			errg.Go(func() error {
+				logger.Debugf("Started with chunksize %d", chunkSize)
+				offset := pos * chunkSize
+				lastReport := offset
+				for {
+					// stop if there are any errors
+					select {
+					case <-errctx.Done():
+						// Context cancelled: exit early
+						return errctx.Err()
+					default:
+					}
+					buf := make([]byte, maximumChunkSize)
+					n, err := f.ReadAt(buf, offset)
+					if err != nil && !errors.Is(err, io.EOF) {
+						logger.Debugf("Error reading %v", err)
+						return fmt.Errorf("failed to read file: %w", err)
+					}
+					if n == 0 || errors.Is(err, io.EOF) {
+						logger.Debugf("EOF reached, stopping")
+						break
+					}
+					// convert the read data into base64. Why? because that is what oxide wants
+					intOffset := int(offset)
+					if err := client.DiskBulkWriteImport(ctx, oxide.DiskBulkWriteImportParams{
+						Disk: oxide.NameOrId(disk.Id),
+						Body: &oxide.ImportBlocksBulkWrite{
+							Base64EncodedData: base64.StdEncoding.EncodeToString(buf[:n]),
+							Offset:            &intOffset,
+						},
+					}); err != nil {
+						logger.Debugf("Error writing to server %v", err)
+						return fmt.Errorf("failed to write data: %w", err)
+					}
+					offset += int64(n)
+
+					if offset-lastReport >= reportingIncrement {
+						logger.Debugf("Uploaded %d bytes of %d bytes", offset, chunkSize)
+						lastReport = offset
+					}
+				}
+				return nil
+			})
 		}
+		if err := errg.Wait(); err != nil {
+			return nil, fmt.Errorf("failed to upload data: %w", err)
+		}
+
 		log.Debugf("Upload complete, wrote %d bytes of %d bytes", offset, size)
 		if err := client.DiskBulkWriteImportStop(ctx, oxide.DiskBulkWriteImportStopParams{
 			Disk: oxide.NameOrId(disk.Id),

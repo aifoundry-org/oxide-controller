@@ -52,6 +52,7 @@ func rootCmd() (*cobra.Command, error) {
 		runOnce                    bool
 		controlPlaneImageBlocksize int
 		workerImageBlocksize       int
+		imageParallelism           int
 
 		logger = log.New()
 	)
@@ -117,6 +118,7 @@ func rootCmd() (*cobra.Command, error) {
 				controlPlanePrefix, workerPrefix, int(controlPlaneCount), int(workerCount),
 				cluster.NodeSpec{Image: cluster.Image{Name: controlPlaneImageName, Source: controlPlaneImageSource, Blocksize: controlPlaneImageBlocksize}, MemoryGB: int(controlPlaneMemory), CPUCount: int(controlPlaneCPU), ExternalIP: controlPlaneExternalIP},
 				cluster.NodeSpec{Image: cluster.Image{Name: workerImageName, Source: workerImageSource, Blocksize: workerImageBlocksize}, MemoryGB: int(workerMemory), CPUCount: int(workerCPU), ExternalIP: workerExternalIP},
+				imageParallelism,
 				controlPlaneSecret, kubeconfig, pubkey,
 				time.Duration(clusterInitWait)*time.Minute,
 				kubeconfigOverwrite,
@@ -212,6 +214,7 @@ func rootCmd() (*cobra.Command, error) {
 	cmd.Flags().StringVar(&address, "address", ":8080", "Address to bind the server to")
 	cmd.Flags().BoolVar(&runOnce, "runonce", false, "Run the server once and then exit, do not run a long-running control loop for checking the controller or listening for API calls")
 	cmd.Flags().IntVar(&controlLoopMins, "control-loop-mins", 5, "How often to run the control loop, in minutes")
+	cmd.Flags().IntVar(&imageParallelism, "image-parallelism", 1, "How many parallel threads to use for uploading images to the sled")
 
 	return cmd, nil
 }
