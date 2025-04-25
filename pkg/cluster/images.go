@@ -95,9 +95,29 @@ func ensureImagesExist(ctx context.Context, logger *log.Entry, client *oxide.Cli
 		}
 		defer os.RemoveAll(file.Name())
 		logger.Debugf("Creating image %s, downloading to %s", missingImage.Name, file.Name())
-		if err := util.DownloadFile(file.Name(), missingImage.Source); err != nil {
+		var (
+			updateChannel             = make(chan int64)
+			totalWritten, lastWritten int64
+			progressInterval          int64 = 100 * MB
+		)
+		go func(c <-chan int64) {
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case bytesWritten := <-c:
+					totalWritten += bytesWritten
+					if (totalWritten - lastWritten) > progressInterval {
+						log.Debugf("Downloaded %d ...\n", totalWritten)
+						lastWritten = totalWritten
+					}
+				}
+			}
+		}(updateChannel)
+		if err := util.DownloadFile(file.Name(), missingImage.Source, updateChannel); err != nil {
 			return nil, fmt.Errorf("failed to download image: %w", err)
 		}
+		close(updateChannel)
 		stat, err := file.Stat()
 		if err != nil {
 			return nil, fmt.Errorf("failed to get file size: %w", err)
@@ -137,8 +157,14 @@ func ensureImagesExist(ctx context.Context, logger *log.Entry, client *oxide.Cli
 		}
 		defer f.Close()
 		var offset, lastReport int
+		// each read size must be a multiple of the block size,
+		// base64 adds 4/3 overhead, and we may have a maximum per-chunk
+		// upload size. So we read no more than 3/4 of the maximum per-chunk
+		// upload size, and round it down to the nearest block size.
+		maximumReadSize := maximumChunkSize * 3 / 4
+		adjustedReadSize := maximumReadSize - (maximumReadSize % int(missingImage.Blocksize))
 		for {
-			buf := make([]byte, MB/2)
+			buf := make([]byte, adjustedReadSize)
 			n, err := f.Read(buf)
 			if err != nil && err != io.EOF {
 				return nil, fmt.Errorf("failed to read file: %w", err)
