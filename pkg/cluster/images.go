@@ -13,7 +13,7 @@ import (
 )
 
 const (
-	reportingIncrement = 100 * 1024 * 1024 // 100MB
+	reportingIncrement = 100 * MB // 100MB
 )
 
 // ensureImagesExist checks if the right images exist and creates them if needed
