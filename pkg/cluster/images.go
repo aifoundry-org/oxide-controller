@@ -199,6 +199,8 @@ func ensureImagesExist(ctx context.Context, logger *log.Entry, client *oxide.Cli
 			Body: &oxide.ImageCreate{
 				Name:        oxide.Name(missingImage.Name),
 				Description: fmt.Sprintf("Image for '%s'", missingImage.Name),
+				Os:          "debian",
+				Version:     "12-cloud",
 				Source: oxide.ImageSource{
 					Type: oxide.ImageSourceTypeSnapshot,
 					Id:   snapshot.Id,
