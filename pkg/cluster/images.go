@@ -61,6 +61,8 @@ func ensureImagesExist(ctx context.Context, logger *log.Entry, client *oxide.Cli
 	for _, image := range globalImages {
 		globalImageMap[string(image.Name)] = &image
 	}
+	// go through each of the target images and see if they exist; if not,
+	// add them to the list of images to create
 	for i := range uniqueImages {
 		if image, ok := projectImageMap[images[i].Name]; ok {
 			logger.Infof("Image %s found in project images", images[i].Name)
@@ -86,7 +88,6 @@ func ensureImagesExist(ctx context.Context, logger *log.Entry, client *oxide.Cli
 	}
 
 	for _, missingImage := range missingImages {
-		snapshotName := fmt.Sprintf("snapshot-%s", missingImage.Name)
 		// how to create the image? oxide makes this a bit of a pain, you need to do multiple steps:
 		// 1. Download the image from the URL locally to a temporary file
 		// 2. Determine the size of the image
@@ -105,7 +106,13 @@ func ensureImagesExist(ctx context.Context, logger *log.Entry, client *oxide.Cli
 			return nil, fmt.Errorf("failed to create temporary file: %w", err)
 		}
 		defer os.RemoveAll(file.Name())
-		logger.Debugf("Creating image %s, downloading to %s", missingImage.Name, file.Name())
+		rnd, err := util.RandomString(8)
+		if err != nil {
+			return nil, fmt.Errorf("failed to generate random string: %w", err)
+		}
+		ephemeralName := fmt.Sprintf("ephemeral-%s-%s", missingImage.Name, rnd)
+		snapshotName := fmt.Sprintf("snapshot-%s", missingImage.Name)
+		logger.Debugf("Creating image %s, disk %s, snapshot %s, downloading to %s", missingImage.Name, ephemeralName, snapshotName, file.Name())
 		var (
 			updateChannel             = make(chan int64)
 			totalWritten, lastWritten int64
@@ -145,7 +152,7 @@ func ensureImagesExist(ctx context.Context, logger *log.Entry, client *oxide.Cli
 			Body: &oxide.DiskCreate{
 				Description: fmt.Sprintf("Disk for image '%s'", missingImage.Name),
 				Size:        oxide.ByteCount(diskSize),
-				Name:        oxide.Name(missingImage.Name),
+				Name:        oxide.Name(ephemeralName),
 				DiskSource: oxide.DiskSource{
 					Type:      oxide.DiskSourceTypeImportingBlocks,
 					BlockSize: oxide.BlockSize(missingImage.Blocksize), // TODO: Must be multiple of image size. Verify?
@@ -161,7 +168,7 @@ func ensureImagesExist(ctx context.Context, logger *log.Entry, client *oxide.Cli
 		}); err != nil {
 			return nil, fmt.Errorf("failed to start bulk write import: %w", err)
 		}
-		// write in 0.5MB chunks or until finished
+		// write in 1MB chunks or until finished
 		f, err := os.Open(file.Name())
 		if err != nil {
 			return nil, fmt.Errorf("failed to open file: %w", err)
