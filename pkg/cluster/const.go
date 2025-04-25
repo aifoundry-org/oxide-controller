@@ -12,5 +12,5 @@ const (
 	secretKeySystemSSHPublic  = "system-ssh-public-key"
 	secretKeySystemSSHPrivate = "system-ssh-private-key"
 	secretKeyWorkerCount      = "worker-count"
-	maximumChunkSize          = 1 * MB
+	maximumChunkSize          = 7 * MB
 )

@@ -106,7 +106,7 @@ func ensureImagesExist(ctx context.Context, logger *log.Entry, client *oxide.Cli
 			return nil, fmt.Errorf("failed to create temporary file: %w", err)
 		}
 		defer os.RemoveAll(file.Name())
-		rnd, err := util.RandomString(8)
+		rnd, err := util.RandomString(8, true)
 		if err != nil {
 			return nil, fmt.Errorf("failed to generate random string: %w", err)
 		}
@@ -124,9 +124,9 @@ func ensureImagesExist(ctx context.Context, logger *log.Entry, client *oxide.Cli
 				case <-ctx.Done():
 					return
 				case bytesWritten := <-c:
-					totalWritten += bytesWritten
+					totalWritten = bytesWritten
 					if (totalWritten - lastWritten) > progressInterval {
-						log.Debugf("Downloaded %d ...\n", totalWritten)
+						logger.Debugf("Downloaded %d ...\n", totalWritten)
 						lastWritten = totalWritten
 					}
 				}
@@ -168,7 +168,6 @@ func ensureImagesExist(ctx context.Context, logger *log.Entry, client *oxide.Cli
 		}); err != nil {
 			return nil, fmt.Errorf("failed to start bulk write import: %w", err)
 		}
-		// write in 1MB chunks or until finished
 		f, err := os.Open(file.Name())
 		if err != nil {
 			return nil, fmt.Errorf("failed to open file: %w", err)

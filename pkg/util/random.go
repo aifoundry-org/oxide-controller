@@ -4,13 +4,21 @@ import (
 	"crypto/rand"
 )
 
-const charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+const lowercaseCharset = "abcdefghijklmnopqrstuvwxyz"
+const uppercaseCharset = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+const numberCharset = "0123456789"
 
-func RandomString(length int) (string, error) {
+func RandomString(length int, lowercaseOnly bool) (string, error) {
 	b := make([]byte, length)
 	_, err := rand.Read(b)
 	if err != nil {
 		return "", err
+	}
+	var charset string
+	if lowercaseOnly {
+		charset = lowercaseCharset + numberCharset
+	} else {
+		charset = lowercaseCharset + uppercaseCharset + numberCharset
 	}
 
 	for i := range b {
