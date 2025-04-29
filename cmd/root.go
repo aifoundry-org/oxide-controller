@@ -18,34 +18,41 @@ import (
 	"github.com/aifoundry-org/oxide-controller/pkg/util"
 )
 
+const (
+	defaultBlocksize = 512
+)
+
 func rootCmd() (*cobra.Command, error) {
 	var (
-		oxideAPIURL             string
-		tokenFilePath           string
-		clusterProject          string
-		controlPlanePrefix      string
-		workerPrefix            string
-		controlPlaneCount       uint
-		workerCount             uint
-		controlPlaneImageName   string
-		controlPlaneImageSource string
-		workerImageName         string
-		workerImageSource       string
-		controlPlaneMemory      uint64
-		workerMemory            uint64
-		controlPlaneCPU         uint16
-		workerCPU               uint16
-		clusterInitWait         int
-		userSSHPublicKey        string
-		kubeconfigPath          string
-		kubeconfigOverwrite     bool
-		controlPlaneSecret      string
-		verbose                 int
-		address                 string
-		workerExternalIP        bool
-		controlPlaneExternalIP  bool
-		controlLoopMins         int
-		runOnce                 bool
+		oxideAPIURL                string
+		tokenFilePath              string
+		clusterProject             string
+		controlPlanePrefix         string
+		workerPrefix               string
+		controlPlaneCount          uint
+		workerCount                uint
+		controlPlaneImageName      string
+		controlPlaneImageSource    string
+		workerImageName            string
+		workerImageSource          string
+		controlPlaneMemory         uint64
+		workerMemory               uint64
+		controlPlaneCPU            uint16
+		workerCPU                  uint16
+		clusterInitWait            int
+		userSSHPublicKey           string
+		kubeconfigPath             string
+		kubeconfigOverwrite        bool
+		controlPlaneSecret         string
+		verbose                    int
+		address                    string
+		workerExternalIP           bool
+		controlPlaneExternalIP     bool
+		controlLoopMins            int
+		runOnce                    bool
+		controlPlaneImageBlocksize int
+		workerImageBlocksize       int
+		imageParallelism           int
 
 		logger = log.New()
 	)
@@ -109,8 +116,9 @@ func rootCmd() (*cobra.Command, error) {
 
 			c := cluster.New(logentry, oxideClient, clusterProject,
 				controlPlanePrefix, workerPrefix, int(controlPlaneCount), int(workerCount),
-				cluster.NodeSpec{Image: cluster.Image{Name: controlPlaneImageName, Source: controlPlaneImageSource}, MemoryGB: int(controlPlaneMemory), CPUCount: int(controlPlaneCPU), ExternalIP: controlPlaneExternalIP},
-				cluster.NodeSpec{Image: cluster.Image{Name: workerImageName, Source: workerImageSource}, MemoryGB: int(workerMemory), CPUCount: int(workerCPU), ExternalIP: workerExternalIP},
+				cluster.NodeSpec{Image: cluster.Image{Name: controlPlaneImageName, Source: controlPlaneImageSource, Blocksize: controlPlaneImageBlocksize}, MemoryGB: int(controlPlaneMemory), CPUCount: int(controlPlaneCPU), ExternalIP: controlPlaneExternalIP},
+				cluster.NodeSpec{Image: cluster.Image{Name: workerImageName, Source: workerImageSource, Blocksize: workerImageBlocksize}, MemoryGB: int(workerMemory), CPUCount: int(workerCPU), ExternalIP: workerExternalIP},
+				imageParallelism,
 				controlPlaneSecret, kubeconfig, pubkey,
 				time.Duration(clusterInitWait)*time.Minute,
 				kubeconfigOverwrite,
@@ -186,7 +194,9 @@ func rootCmd() (*cobra.Command, error) {
 	cmd.Flags().UintVar(&controlPlaneCount, "control-plane-count", 3, "Number of control plane instances to maintain")
 	cmd.Flags().StringVar(&controlPlaneImageName, "control-plane-image-name", "debian-12-cloud", "Image to use for control plane instances")
 	cmd.Flags().StringVar(&controlPlaneImageSource, "control-plane-image-source", "https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-genericcloud-amd64.raw", "Image to use for control plane instances")
+	cmd.Flags().IntVar(&controlPlaneImageBlocksize, "control-plane-image-blocksize", defaultBlocksize, "Blocksize to use for control plane images")
 	cmd.Flags().StringVar(&workerImageName, "worker-image-name", "debian-12-cloud", "Image to use for worker nodes")
+	cmd.Flags().IntVar(&workerImageBlocksize, "worker-image-blocksize", defaultBlocksize, "Blocksize to use for worker images")
 	cmd.Flags().StringVar(&workerImageSource, "worker-image-source", "https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-genericcloud-amd64.raw", "Image to use for worker instances")
 	cmd.Flags().Uint64Var(&controlPlaneMemory, "control-plane-memory", 4, "Memory to allocate to each control plane node, in GB")
 	cmd.Flags().UintVar(&workerCount, "worker-count", 0, "Number of worker instances to create on startup and maintain, until changed via API")
@@ -204,6 +214,7 @@ func rootCmd() (*cobra.Command, error) {
 	cmd.Flags().StringVar(&address, "address", ":8080", "Address to bind the server to")
 	cmd.Flags().BoolVar(&runOnce, "runonce", false, "Run the server once and then exit, do not run a long-running control loop for checking the controller or listening for API calls")
 	cmd.Flags().IntVar(&controlLoopMins, "control-loop-mins", 5, "How often to run the control loop, in minutes")
+	cmd.Flags().IntVar(&imageParallelism, "image-parallelism", 1, "How many parallel threads to use for uploading images to the sled")
 
 	return cmd, nil
 }

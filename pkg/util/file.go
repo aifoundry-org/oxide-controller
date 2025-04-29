@@ -3,6 +3,7 @@ package util
 import (
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"strings"
@@ -57,8 +58,11 @@ func LoadFileAllowMissing(path string) ([]byte, error) {
 }
 
 // DownloadFile downloads a file from a URL and saves it to the local filesystem
-// It should understand different file URL schemes, but for now, just knows https
-func DownloadFile(filepath, url string) error {
+// It should understand different file URL schemes, but for now, just knows https.
+// updateChannel is a channel that will receive progress updates if bytes written.
+// The caller must be prepared to close the channel, and must ensure it is non-blocking.
+// It writes updates with every buffer, which is 32KB.
+func DownloadFile(filepath, url string, updateChannel chan<- int64) error {
 	resp, err := http.Get(url)
 	if err != nil {
 		return fmt.Errorf("failed to download file: %w", err)
@@ -71,9 +75,27 @@ func DownloadFile(filepath, url string) error {
 	}
 	defer f.Close()
 
-	if _, err := f.ReadFrom(resp.Body); err != nil {
-		return fmt.Errorf("failed to write file: %w", err)
+	var totalWritten int64
+
+	buf := make([]byte, 32*1024) // 32KB buffer
+	for {
+		n, err := resp.Body.Read(buf)
+		if n > 0 {
+			written, writeErr := f.Write(buf[:n])
+			if writeErr != nil {
+				return fmt.Errorf("failed to write file: %w", writeErr)
+			}
+			totalWritten += int64(written)
+			updateChannel <- totalWritten
+		}
+		if err != nil {
+			if err == http.ErrBodyReadAfterClose || errors.Is(err, io.EOF) {
+				break
+			}
+			return fmt.Errorf("failed to read response body: %w", err)
+		}
 	}
+
 	return nil
 }
 

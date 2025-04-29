@@ -29,10 +29,11 @@ type Cluster struct {
 	secretName                   string
 	kubeconfig, userPubkey       []byte
 	controlPlaneIP               string
+	imageParallelism             int
 }
 
 // New creates a new Cluster instance
-func New(logger *log.Entry, client *oxide.Client, projectID string, controlPlanePrefix, workerPrefix string, controlPlaneCount, workerCount int, controlPlaneSpec, workerSpec NodeSpec, secretName string, kubeconfig, pubkey []byte, clusterInitWait time.Duration, kubeconfigOverwrite bool) *Cluster {
+func New(logger *log.Entry, client *oxide.Client, projectID string, controlPlanePrefix, workerPrefix string, controlPlaneCount, workerCount int, controlPlaneSpec, workerSpec NodeSpec, imageParallelism int, secretName string, kubeconfig, pubkey []byte, clusterInitWait time.Duration, kubeconfigOverwrite bool) *Cluster {
 	c := &Cluster{
 		logger:              logger.WithField("component", "cluster"),
 		client:              client,
@@ -46,6 +47,7 @@ func New(logger *log.Entry, client *oxide.Client, projectID string, controlPlane
 		userPubkey:          pubkey,
 		clusterInitWait:     clusterInitWait,
 		kubeconfigOverwrite: kubeconfigOverwrite,
+		imageParallelism:    imageParallelism,
 	}
 	c.workerCount = workerCount
 	c.controlPlaneCount = controlPlaneCount
