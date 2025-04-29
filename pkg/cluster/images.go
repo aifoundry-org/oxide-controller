@@ -117,25 +117,26 @@ func ensureImagesExist(ctx context.Context, logger *log.Entry, client *oxide.Cli
 		snapshotName := fmt.Sprintf("snapshot-%s", missingImage.Name)
 		logger.Debugf("Creating image %s, disk %s, snapshot %s, downloading to %s", missingImage.Name, ephemeralName, snapshotName, file.Name())
 		var (
-			updateChannel             = make(chan int64)
-			totalWritten, lastWritten int64
-			progressInterval          int64 = 100 * MB
+			updateChannel          = make(chan int64)
+			progressInterval int64 = 100 * MB
 		)
 		go func(c <-chan int64) {
 			for {
 				select {
 				case <-ctx.Done():
+					logger.Debug("Download complete")
 					return
-				case bytesWritten := <-c:
-					totalWritten = bytesWritten
-					if (totalWritten - lastWritten) > progressInterval {
-						logger.Debugf("Downloaded %d ...\n", totalWritten)
-						lastWritten = totalWritten
+				case totalWritten, ok := <-c:
+					if !ok {
+						logger.Debug("Download complete")
+						return
 					}
+					logger.Debugf("Downloaded %d ...\n", totalWritten)
 				}
 			}
+
 		}(updateChannel)
-		if err := util.DownloadFile(file.Name(), missingImage.Source, updateChannel); err != nil {
+		if err := util.DownloadFile(file.Name(), missingImage.Source, updateChannel, progressInterval); err != nil {
 			return nil, fmt.Errorf("failed to download image: %w", err)
 		}
 		close(updateChannel)
@@ -188,6 +189,7 @@ func ensureImagesExist(ctx context.Context, logger *log.Entry, client *oxide.Cli
 		)
 		errg, errctx := errgroup.WithContext(context.Background())
 		logger.Debugf("Uploading %d bytes in %d threads of %d bytes", size, parallelism, parallelSize)
+
 		for i := range parallelism {
 			// next vars are because of closure issues
 			pos := int64(i)

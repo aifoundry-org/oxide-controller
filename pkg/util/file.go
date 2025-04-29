@@ -62,7 +62,7 @@ func LoadFileAllowMissing(path string) ([]byte, error) {
 // updateChannel is a channel that will receive progress updates if bytes written.
 // The caller must be prepared to close the channel, and must ensure it is non-blocking.
 // It writes updates with every buffer, which is 32KB.
-func DownloadFile(filepath, url string, updateChannel chan<- int64) error {
+func DownloadFile(filepath, url string, updateChannel chan<- int64, progressInterval int64) error {
 	resp, err := http.Get(url)
 	if err != nil {
 		return fmt.Errorf("failed to download file: %w", err)
@@ -75,7 +75,7 @@ func DownloadFile(filepath, url string, updateChannel chan<- int64) error {
 	}
 	defer f.Close()
 
-	var totalWritten int64
+	var totalWritten, lastWritten int64
 
 	buf := make([]byte, 32*1024) // 32KB buffer
 	for {
@@ -86,7 +86,10 @@ func DownloadFile(filepath, url string, updateChannel chan<- int64) error {
 				return fmt.Errorf("failed to write file: %w", writeErr)
 			}
 			totalWritten += int64(written)
-			updateChannel <- totalWritten
+			if updateChannel != nil && (totalWritten-lastWritten) >= progressInterval {
+				updateChannel <- totalWritten
+				lastWritten = totalWritten
+			}
 		}
 		if err != nil {
 			if err == http.ErrBodyReadAfterClose || errors.Is(err, io.EOF) {
