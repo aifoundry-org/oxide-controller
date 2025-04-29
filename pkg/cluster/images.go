@@ -210,6 +210,9 @@ func ensureImagesExist(ctx context.Context, logger *log.Entry, client *oxide.Cli
 						return errctx.Err()
 					default:
 					}
+					// TODO: This should be a single reusable buffer
+					// from outside the loop for efficiency.
+					// Unless go compiler correctly optimizes this.
 					buf := make([]byte, maximumChunkSize)
 					n, err := f.ReadAt(buf, offset)
 					if err != nil && !errors.Is(err, io.EOF) {
