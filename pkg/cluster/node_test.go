@@ -10,10 +10,11 @@ func TestGenerateCloudConfig(t *testing.T) {
 		controlPlaneIP string
 		joinToken      string
 		pubkey         []string
+		extraDisk      string
 		expected       string
 		err            error
 	}{
-		{"server-init-pubkey", "server", true, "10.0.0.5", "joinme", []string{"somekey"}, `#cloud-config
+		{"server-init-pubkey", "server", true, "10.0.0.5", "joinme", []string{"somekey"}, "", `#cloud-config
 runcmd:
   - |
     PRIVATE_IP=$(hostname -I | awk '{print $1}')
@@ -28,7 +29,7 @@ ssh_pwauth: false
 disable_root: false
 allow_public_ssh_keys: true
 `, nil},
-		{"server-init-nopubkey", "server", true, "10.0.0.5", "joinme", nil, `#cloud-config
+		{"server-init-nopubkey", "server", true, "10.0.0.5", "joinme", nil, "", `#cloud-config
 runcmd:
   - |
     PRIVATE_IP=$(hostname -I | awk '{print $1}')
@@ -38,7 +39,7 @@ ssh_pwauth: false
 disable_root: false
 allow_public_ssh_keys: true
 `, nil},
-		{"server-join-pubkey", "server", false, "10.0.0.5", "joinme", []string{"somekey"}, `#cloud-config
+		{"server-join-pubkey", "server", false, "10.0.0.5", "joinme", []string{"somekey"}, "", `#cloud-config
 runcmd:
   - |
     PRIVATE_IP=$(hostname -I | awk '{print $1}')
@@ -53,7 +54,7 @@ ssh_pwauth: false
 disable_root: false
 allow_public_ssh_keys: true
 `, nil},
-		{"server-join-nopubkey", "server", false, "10.0.0.5", "joinme", nil, `#cloud-config
+		{"server-join-nopubkey", "server", false, "10.0.0.5", "joinme", nil, "", `#cloud-config
 runcmd:
   - |
     PRIVATE_IP=$(hostname -I | awk '{print $1}')
@@ -63,7 +64,7 @@ ssh_pwauth: false
 disable_root: false
 allow_public_ssh_keys: true
 `, nil},
-		{"agent-pubkey", "agent", false, "10.0.0.5", "joinme", []string{"somekey"}, `#cloud-config
+		{"agent-pubkey", "agent", false, "10.0.0.5", "joinme", []string{"somekey"}, "", `#cloud-config
 runcmd:
   - |
     PRIVATE_IP=$(hostname -I | awk '{print $1}')
@@ -78,7 +79,7 @@ ssh_pwauth: false
 disable_root: false
 allow_public_ssh_keys: true
 `, nil},
-		{"agent-nopubkey", "agent", false, "10.0.0.5", "joinme", nil, `#cloud-config
+		{"agent-nopubkey", "agent", false, "10.0.0.5", "joinme", nil, "", `#cloud-config
 runcmd:
   - |
     PRIVATE_IP=$(hostname -I | awk '{print $1}')
@@ -92,7 +93,7 @@ allow_public_ssh_keys: true
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result, err := GenerateCloudConfig(tt.nodeType, tt.initCluster, tt.controlPlaneIP, tt.joinToken, tt.pubkey)
+			result, err := GenerateCloudConfig(tt.nodeType, tt.initCluster, tt.controlPlaneIP, tt.joinToken, tt.pubkey, tt.extraDisk)
 			if err != nil && err != tt.err {
 				t.Errorf("expected error %v, got %v", tt.err, err)
 			}

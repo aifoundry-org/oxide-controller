@@ -33,9 +33,9 @@ func (c *Cluster) Execute(ctx context.Context) (newKubeconfig []byte, err error)
 	}
 	c.logger.Infof("images %v", images)
 	c.controlPlaneSpec.Image = images[0]
-	c.controlPlaneSpec.DiskSize = util.RoundUp(images[0].Size, GB)
+	c.controlPlaneSpec.RootDiskSize = util.RoundUp(images[0].Size, GB)
 	c.workerSpec.Image = images[1]
-	c.workerSpec.DiskSize = util.RoundUp(images[0].Size, GB)
+	c.workerSpec.RootDiskSize = util.RoundUp(images[0].Size, GB)
 
 	newKubeconfig, err = c.ensureClusterExists(ctx)
 	if err != nil {
