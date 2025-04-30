@@ -24,35 +24,37 @@ const (
 
 func rootCmd() (*cobra.Command, error) {
 	var (
-		oxideAPIURL                string
-		tokenFilePath              string
-		clusterProject             string
-		controlPlanePrefix         string
-		workerPrefix               string
-		controlPlaneCount          uint
-		workerCount                uint
-		controlPlaneImageName      string
-		controlPlaneImageSource    string
-		workerImageName            string
-		workerImageSource          string
-		controlPlaneMemory         uint64
-		workerMemory               uint64
-		controlPlaneCPU            uint16
-		workerCPU                  uint16
-		clusterInitWait            int
-		userSSHPublicKey           string
-		kubeconfigPath             string
-		kubeconfigOverwrite        bool
-		controlPlaneSecret         string
-		verbose                    int
-		address                    string
-		workerExternalIP           bool
-		controlPlaneExternalIP     bool
-		controlLoopMins            int
-		runOnce                    bool
-		controlPlaneImageBlocksize int
-		workerImageBlocksize       int
-		imageParallelism           int
+		oxideAPIURL                 string
+		tokenFilePath               string
+		clusterProject              string
+		controlPlanePrefix          string
+		workerPrefix                string
+		controlPlaneCount           uint
+		workerCount                 uint
+		controlPlaneImageName       string
+		controlPlaneImageSource     string
+		workerImageName             string
+		workerImageSource           string
+		controlPlaneMemory          uint64
+		workerMemory                uint64
+		controlPlaneCPU             uint16
+		workerCPU                   uint16
+		clusterInitWait             int
+		userSSHPublicKey            string
+		kubeconfigPath              string
+		kubeconfigOverwrite         bool
+		controlPlaneSecret          string
+		verbose                     int
+		address                     string
+		workerExternalIP            bool
+		controlPlaneExternalIP      bool
+		controlLoopMins             int
+		runOnce                     bool
+		controlPlaneImageBlocksize  int
+		workerImageBlocksize        int
+		imageParallelism            int
+		workerExtraDiskSizeGB       uint
+		controlPlaneExtraDiskSizeGB uint
 
 		logger = log.New()
 	)
@@ -116,8 +118,8 @@ func rootCmd() (*cobra.Command, error) {
 
 			c := cluster.New(logentry, oxideClient, clusterProject,
 				controlPlanePrefix, workerPrefix, int(controlPlaneCount), int(workerCount),
-				cluster.NodeSpec{Image: cluster.Image{Name: controlPlaneImageName, Source: controlPlaneImageSource, Blocksize: controlPlaneImageBlocksize}, MemoryGB: int(controlPlaneMemory), CPUCount: int(controlPlaneCPU), ExternalIP: controlPlaneExternalIP},
-				cluster.NodeSpec{Image: cluster.Image{Name: workerImageName, Source: workerImageSource, Blocksize: workerImageBlocksize}, MemoryGB: int(workerMemory), CPUCount: int(workerCPU), ExternalIP: workerExternalIP},
+				cluster.NodeSpec{Image: cluster.Image{Name: controlPlaneImageName, Source: controlPlaneImageSource, Blocksize: controlPlaneImageBlocksize}, MemoryGB: int(controlPlaneMemory), CPUCount: int(controlPlaneCPU), ExternalIP: controlPlaneExternalIP, ExtraDiskSize: int(controlPlaneExtraDiskSizeGB * cluster.GB)},
+				cluster.NodeSpec{Image: cluster.Image{Name: workerImageName, Source: workerImageSource, Blocksize: workerImageBlocksize}, MemoryGB: int(workerMemory), CPUCount: int(workerCPU), ExternalIP: workerExternalIP, ExtraDiskSize: int(workerExtraDiskSizeGB * cluster.GB)},
 				imageParallelism,
 				controlPlaneSecret, kubeconfig, pubkey,
 				time.Duration(clusterInitWait)*time.Minute,
@@ -198,6 +200,8 @@ func rootCmd() (*cobra.Command, error) {
 	cmd.Flags().StringVar(&workerImageName, "worker-image-name", "debian-12-cloud", "Image to use for worker nodes")
 	cmd.Flags().IntVar(&workerImageBlocksize, "worker-image-blocksize", defaultBlocksize, "Blocksize to use for worker images")
 	cmd.Flags().StringVar(&workerImageSource, "worker-image-source", "https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-genericcloud-amd64.raw", "Image to use for worker instances")
+	cmd.Flags().UintVar(&workerExtraDiskSizeGB, "worker-extra-disk-size", 0, "Size of extra disk to attach to worker nodes, in GB. Leave as 0 for no extra disk.")
+	cmd.Flags().UintVar(&controlPlaneExtraDiskSizeGB, "control-plane-extra-disk-size", 0, "Size of extra disk to attach to control plane nodes, in GB. Leave as 0 for no extra disk.")
 	cmd.Flags().Uint64Var(&controlPlaneMemory, "control-plane-memory", 4, "Memory to allocate to each control plane node, in GB")
 	cmd.Flags().UintVar(&workerCount, "worker-count", 0, "Number of worker instances to create on startup and maintain, until changed via API")
 	cmd.Flags().Uint64Var(&workerMemory, "worker-memory", 16, "Memory to allocate to each worker node, in GB")

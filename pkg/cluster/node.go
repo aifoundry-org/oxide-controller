@@ -15,31 +15,51 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
+const (
+	extraDisk = "/dev/nvme1n1"
+)
+
 func CreateInstance(ctx context.Context, client *oxide.Client, projectID, instanceName string, spec NodeSpec, cloudConfig string) (*oxide.Instance, error) {
-	params := oxide.InstanceCreateParams{
-		Project: oxide.NameOrId(projectID),
-		Body: &oxide.InstanceCreate{
+	disks := []oxide.InstanceDiskAttachment{
+		{
+			Type: oxide.InstanceDiskAttachmentTypeCreate,
+			DiskSource: oxide.DiskSource{
+				Type:      oxide.DiskSourceTypeImage,
+				ImageId:   spec.Image.ID,
+				BlockSize: blockSize,
+			},
+			Size:        oxide.ByteCount(spec.RootDiskSize),
 			Name:        oxide.Name(instanceName),
 			Description: instanceName,
-			Hostname:    oxide.Hostname(instanceName),
-			Memory:      oxide.ByteCount(spec.MemoryGB * GB),
-			Ncpus:       oxide.InstanceCpuCount(spec.CPUCount),
-			BootDisk: &oxide.InstanceDiskAttachment{
-				Type: "create",
-				DiskSource: oxide.DiskSource{
-					Type:      oxide.DiskSourceTypeImage,
-					ImageId:   spec.Image.ID,
-					BlockSize: blockSize,
-				},
-				Size:        oxide.ByteCount(spec.DiskSize),
-				Name:        oxide.Name(instanceName),
-				Description: instanceName,
-			},
-			NetworkInterfaces: oxide.InstanceNetworkInterfaceAttachment{
-				Type: "default",
-			},
-			UserData: cloudConfig,
 		},
+	}
+	if spec.ExtraDiskSize > 0 {
+		disks = append(disks, oxide.InstanceDiskAttachment{
+			Type: oxide.InstanceDiskAttachmentTypeCreate,
+			DiskSource: oxide.DiskSource{
+				Type:      oxide.DiskSourceTypeBlank,
+				BlockSize: blockSize,
+			},
+			Size:        oxide.ByteCount(spec.ExtraDiskSize),
+			Name:        oxide.Name(instanceName + "-disk-1"),
+			Description: instanceName,
+		})
+	}
+	createBody := &oxide.InstanceCreate{
+		Name:        oxide.Name(instanceName),
+		Description: instanceName,
+		Hostname:    oxide.Hostname(instanceName),
+		Memory:      oxide.ByteCount(spec.MemoryGB * GB),
+		Ncpus:       oxide.InstanceCpuCount(spec.CPUCount),
+		NetworkInterfaces: oxide.InstanceNetworkInterfaceAttachment{
+			Type: "default",
+		},
+		UserData: cloudConfig,
+		Disks:    disks,
+	}
+	params := oxide.InstanceCreateParams{
+		Project: oxide.NameOrId(projectID),
+		Body:    createBody,
 	}
 	if spec.ExternalIP {
 		params.Body.ExternalIps = []oxide.ExternalIpCreate{
@@ -52,8 +72,8 @@ func CreateInstance(ctx context.Context, client *oxide.Client, projectID, instan
 }
 
 // GenerateCloudConfigB64 generates a base64 encoded cloud config for a particular node type
-func GenerateCloudConfigB64(nodeType string, initCluster bool, controlPlaneIP, joinToken string, pubkey []string) (string, error) {
-	cloudConfig, err := GenerateCloudConfig(nodeType, initCluster, controlPlaneIP, joinToken, pubkey)
+func GenerateCloudConfigB64(nodeType string, initCluster bool, controlPlaneIP, joinToken string, pubkey []string, extraDisk string) (string, error) {
+	cloudConfig, err := GenerateCloudConfig(nodeType, initCluster, controlPlaneIP, joinToken, pubkey, extraDisk)
 	if err != nil {
 		return "", fmt.Errorf("failed to generate cloud config: %w", err)
 	}
@@ -61,7 +81,7 @@ func GenerateCloudConfigB64(nodeType string, initCluster bool, controlPlaneIP, j
 }
 
 // GenerateCloudConfig for a particular node type
-func GenerateCloudConfig(nodeType string, initCluster bool, controlPlaneIP, joinToken string, pubkey []string) ([]byte, error) {
+func GenerateCloudConfig(nodeType string, initCluster bool, controlPlaneIP, joinToken string, pubkey []string, extraDisk string) ([]byte, error) {
 	var (
 		k3sArgs []string
 		port    int = 6443
@@ -143,7 +163,11 @@ func (c *Cluster) CreateControlPlaneNodes(ctx context.Context, initCluster bool,
 	if additionalPubKeys != nil {
 		pubKeyList = append(pubKeyList, additionalPubKeys...)
 	}
-	cloudConfig, err := GenerateCloudConfigB64("server", initCluster, c.controlPlaneIP, joinToken, pubKeyList)
+	var extraNodeDisk string
+	if c.controlPlaneSpec.ExtraDiskSize > 0 {
+		extraNodeDisk = extraDisk
+	}
+	cloudConfig, err := GenerateCloudConfigB64("server", initCluster, c.controlPlaneIP, joinToken, pubKeyList, extraNodeDisk)
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate cloud config: %w", err)
 	}
@@ -203,7 +227,11 @@ func (c *Cluster) EnsureWorkerNodes(ctx context.Context) ([]oxide.Instance, erro
 	if len(pubkey) > 0 {
 		pubkeys = append(pubkeys, string(pubkey))
 	}
-	cloudConfig, err := GenerateCloudConfigB64("agent", false, c.controlPlaneIP, joinToken, pubkeys)
+	var extraNodeDisk string
+	if c.controlPlaneSpec.ExtraDiskSize > 0 {
+		extraNodeDisk = extraDisk
+	}
+	cloudConfig, err := GenerateCloudConfigB64("agent", false, c.controlPlaneIP, joinToken, pubkeys, extraNodeDisk)
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate cloud config: %w", err)
 	}
