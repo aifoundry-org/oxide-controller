@@ -93,7 +93,7 @@ allow_public_ssh_keys: true
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result, err := GenerateCloudConfig(tt.nodeType, tt.initCluster, tt.controlPlaneIP, tt.joinToken, tt.pubkey, tt.extraDisk)
+			result, err := GenerateCloudConfig(tt.nodeType, tt.initCluster, tt.controlPlaneIP, tt.joinToken, tt.pubkey, tt.extraDisk, "", "")
 			if err != nil && err != tt.err {
 				t.Errorf("expected error %v, got %v", tt.err, err)
 			}

@@ -72,8 +72,8 @@ func CreateInstance(ctx context.Context, client *oxide.Client, projectID, instan
 }
 
 // GenerateCloudConfigB64 generates a base64 encoded cloud config for a particular node type
-func GenerateCloudConfigB64(nodeType string, initCluster bool, controlPlaneIP, joinToken string, pubkey []string, extraDisk string) (string, error) {
-	cloudConfig, err := GenerateCloudConfig(nodeType, initCluster, controlPlaneIP, joinToken, pubkey, extraDisk)
+func GenerateCloudConfigB64(nodeType string, initCluster bool, controlPlaneIP, joinToken string, pubkey []string, extraDisk, tailscaleAuthKey, tailscaleTag string) (string, error) {
+	cloudConfig, err := GenerateCloudConfig(nodeType, initCluster, controlPlaneIP, joinToken, pubkey, extraDisk, tailscaleAuthKey, tailscaleTag)
 	if err != nil {
 		return "", fmt.Errorf("failed to generate cloud config: %w", err)
 	}
@@ -81,7 +81,7 @@ func GenerateCloudConfigB64(nodeType string, initCluster bool, controlPlaneIP, j
 }
 
 // GenerateCloudConfig for a particular node type
-func GenerateCloudConfig(nodeType string, initCluster bool, controlPlaneIP, joinToken string, pubkey []string, extraDisk string) ([]byte, error) {
+func GenerateCloudConfig(nodeType string, initCluster bool, controlPlaneIP, joinToken string, pubkey []string, extraDisk, tailscaleAuthKey, tailscaleTag string) ([]byte, error) {
 	var (
 		k3sArgs []string
 		port    int = 6443
@@ -122,6 +122,18 @@ func GenerateCloudConfig(nodeType string, initCluster bool, controlPlaneIP, join
 	cfg.AllowPublicSSHKeys = true
 	cfg.SSHPWAuth = false
 	cfg.DisableRoot = false
+	// if tailscale provided, add it to the config
+	if tailscaleAuthKey != "" {
+		cfg.RunCmd = append(cfg.RunCmd, []string{
+			"curl -fsSL https://pkgs.tailscale.com/stable/debian/bullseye.noarmor.gpg | sudo tee /usr/share/keyrings/tailscale-archive-keyring.gpg >/dev/null",
+			"curl -fsSL https://pkgs.tailscale.com/stable/debian/bullseye.tailscale-keyring.list | sudo tee /etc/apt/sources.list.d/tailscale.list",
+			"sudo apt-get update -y",
+			"sudo apt-get install -y tailscale",
+			"systemctl enable tailscaled",
+			"systemctl start tailscaled",
+			fmt.Sprintf("tailscale up --advertise-tags=tag:%s --authkey %s", tailscaleTag, tailscaleAuthKey),
+		})
+	}
 	var buf bytes.Buffer
 	enc := yaml.NewEncoder(&buf)
 	enc.SetIndent(2)
@@ -167,7 +179,7 @@ func (c *Cluster) CreateControlPlaneNodes(ctx context.Context, initCluster bool,
 	if c.controlPlaneSpec.ExtraDiskSize > 0 {
 		extraNodeDisk = extraDisk
 	}
-	cloudConfig, err := GenerateCloudConfigB64("server", initCluster, c.controlPlaneIP, joinToken, pubKeyList, extraNodeDisk)
+	cloudConfig, err := GenerateCloudConfigB64("server", initCluster, c.controlPlaneIP, joinToken, pubKeyList, extraNodeDisk, c.controlPlaneSpec.TailscaleAuthKey, c.controlPlaneSpec.TailscaleTag)
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate cloud config: %w", err)
 	}
@@ -231,7 +243,7 @@ func (c *Cluster) EnsureWorkerNodes(ctx context.Context) ([]oxide.Instance, erro
 	if c.controlPlaneSpec.ExtraDiskSize > 0 {
 		extraNodeDisk = extraDisk
 	}
-	cloudConfig, err := GenerateCloudConfigB64("agent", false, c.controlPlaneIP, joinToken, pubkeys, extraNodeDisk)
+	cloudConfig, err := GenerateCloudConfigB64("agent", false, c.controlPlaneIP, joinToken, pubkeys, extraNodeDisk, c.workerSpec.TailscaleAuthKey, c.workerSpec.TailscaleTag)
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate cloud config: %w", err)
 	}
