@@ -153,7 +153,7 @@ func (c *Cluster) ensureClusterExists(ctx context.Context) (newKubeconfig []byte
 			fipAttached bool
 		)
 		if c.controlPlaneSpec.ExternalIP {
-			log.Debugf("Control plane node %s has external IP, using that", hostid)
+			c.logger.Debugf("Control plane node %s has external IP, using that", hostid)
 			ipList, err := client.InstanceExternalIpList(ctx, oxide.InstanceExternalIpListParams{
 				Instance: oxide.NameOrId(hostid),
 			})
@@ -166,7 +166,7 @@ func (c *Cluster) ensureClusterExists(ctx context.Context) (newKubeconfig []byte
 			externalIP = ipList.Items[0].Ip
 		} else {
 			// attach the floating IP to the control plane node
-			log.Debugf("Control plane node %s does not have external IP, attaching and using floating IP", hostid)
+			c.logger.Debugf("Control plane node %s does not have external IP, attaching and using floating IP", hostid)
 			// floating ip attachment sometimes just doesn't work right after we create the node,
 			// so give it a few retries
 			var (
@@ -183,10 +183,10 @@ func (c *Cluster) ensureClusterExists(ctx context.Context) (newKubeconfig []byte
 						Parent: oxide.NameOrId(hostid),
 					},
 				}); err != nil {
-					log.Debugf("Failed to attach floating IP %v, retrying %d/%d", err, i+1, maxTries)
+					c.logger.Debugf("Failed to attach floating IP %v, retrying %d/%d", err, i+1, maxTries)
 					continue
 				}
-				log.Debug("Successfully attached floating IP")
+				c.logger.Debug("Successfully attached floating IP")
 				attached = true
 				break
 			}
@@ -215,7 +215,7 @@ func (c *Cluster) ensureClusterExists(ctx context.Context) (newKubeconfig []byte
 		}
 		// attach the floating IP to the control plane node, if not done already
 		if !fipAttached {
-			log.Debugf("Control plane node %s did not have floating IP attached, attaching", hostid)
+			c.logger.Debugf("Control plane node %s did not have floating IP attached, attaching", hostid)
 			if _, err := client.FloatingIpAttach(ctx, oxide.FloatingIpAttachParams{
 				FloatingIp: oxide.NameOrId(controlPlaneIP.Id),
 				Body: &oxide.FloatingIpAttach{
