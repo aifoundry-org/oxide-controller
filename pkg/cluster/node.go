@@ -20,19 +20,7 @@ const (
 )
 
 func CreateInstance(ctx context.Context, client *oxide.Client, projectID, instanceName string, spec NodeSpec, cloudConfig string) (*oxide.Instance, error) {
-	disks := []oxide.InstanceDiskAttachment{
-		{
-			Type: oxide.InstanceDiskAttachmentTypeCreate,
-			DiskSource: oxide.DiskSource{
-				Type:      oxide.DiskSourceTypeImage,
-				ImageId:   spec.Image.ID,
-				BlockSize: blockSize,
-			},
-			Size:        oxide.ByteCount(spec.RootDiskSize),
-			Name:        oxide.Name(instanceName),
-			Description: instanceName,
-		},
-	}
+	var disks []oxide.InstanceDiskAttachment
 	if spec.ExtraDiskSize > 0 {
 		disks = append(disks, oxide.InstanceDiskAttachment{
 			Type: oxide.InstanceDiskAttachmentTypeCreate,
@@ -54,6 +42,18 @@ func CreateInstance(ctx context.Context, client *oxide.Client, projectID, instan
 		NetworkInterfaces: oxide.InstanceNetworkInterfaceAttachment{
 			Type: "default",
 		},
+		BootDisk: &oxide.InstanceDiskAttachment{
+			Type: oxide.InstanceDiskAttachmentTypeCreate,
+			DiskSource: oxide.DiskSource{
+				Type:      oxide.DiskSourceTypeImage,
+				ImageId:   spec.Image.ID,
+				BlockSize: blockSize,
+			},
+			Size:        oxide.ByteCount(spec.RootDiskSize),
+			Name:        oxide.Name(instanceName),
+			Description: instanceName,
+		},
+
 		UserData: cloudConfig,
 		Disks:    disks,
 	}
