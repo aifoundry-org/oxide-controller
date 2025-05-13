@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/aifoundry-org/oxide-controller/pkg/util"
 	"github.com/oxidecomputer/oxide.go/oxide"
 	log "github.com/sirupsen/logrus"
 	"gopkg.in/yaml.v3"
@@ -20,8 +21,16 @@ const (
 )
 
 func CreateInstance(ctx context.Context, client *oxide.Client, projectID, instanceName string, spec NodeSpec, cloudConfig string) (*oxide.Instance, error) {
+	// every disk needs a unique name. Unfortunately, due to a bug in how
+	// the disks are provided a controller, if the first 20 characters are the same
+	// then you end up with controller conflicts.
+	// Until the bug is fixed, we will just add a random 8-character prefix to the name.
 	var disks []oxide.InstanceDiskAttachment
 	if spec.ExtraDiskSize > 0 {
+		prefix, err := util.RandomString(8, true)
+		if err != nil {
+			return nil, fmt.Errorf("failed to generate random string: %w", err)
+		}
 		disks = append(disks, oxide.InstanceDiskAttachment{
 			Type: oxide.InstanceDiskAttachmentTypeCreate,
 			DiskSource: oxide.DiskSource{
@@ -29,9 +38,13 @@ func CreateInstance(ctx context.Context, client *oxide.Client, projectID, instan
 				BlockSize: blockSize,
 			},
 			Size:        oxide.ByteCount(spec.ExtraDiskSize),
-			Name:        oxide.Name(instanceName + "-disk-1"),
+			Name:        oxide.Name(fmt.Sprintf("%s-%s-disk-1", prefix, instanceName)),
 			Description: instanceName,
 		})
+	}
+	prefix, err := util.RandomString(8, true)
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate random string: %w", err)
 	}
 	createBody := &oxide.InstanceCreate{
 		Name:        oxide.Name(instanceName),
@@ -50,7 +63,7 @@ func CreateInstance(ctx context.Context, client *oxide.Client, projectID, instan
 				BlockSize: blockSize,
 			},
 			Size:        oxide.ByteCount(spec.RootDiskSize),
-			Name:        oxide.Name(instanceName),
+			Name:        oxide.Name(fmt.Sprintf("%s-%s", prefix, instanceName)),
 			Description: instanceName,
 		},
 
