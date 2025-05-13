@@ -60,3 +60,13 @@ When running a controller against an existing cluster, one of the following must
 If none of the above is true, the controller will not be able to access the cluster and will fail.
 For a new cluster with no control plane nodes, the controller will create the new cluster and inject
 the new information.
+
+## tailscale
+
+If you provide a tailscale auth key, as part of the configuration, or the path to a key, the
+oxide-controller will install tailscale on every node on the cluster, and join it to a tailnet
+with the provided auth key. This is useful for accessing the nodes from outside the cluster, without
+using public IP addresses.
+
+By default, the nodes will join with the tailscale tag `ainekko-k8s-node`. You can override it
+using CLI flags. The tag *must* be a valid tailscale tag in your tailnet.

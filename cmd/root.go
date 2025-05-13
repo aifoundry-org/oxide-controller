@@ -55,6 +55,9 @@ func rootCmd() (*cobra.Command, error) {
 		imageParallelism            int
 		workerExtraDiskSizeGB       uint
 		controlPlaneExtraDiskSizeGB uint
+		tailscaleAuthKey            string
+		tailscaleAuthKeyFile        string
+		tailscaleTag                string
 
 		logger = log.New()
 	)
@@ -114,12 +117,29 @@ func rootCmd() (*cobra.Command, error) {
 				return fmt.Errorf("failed to create Oxide API client: %v", err)
 			}
 
+			// make sure only one of the tailscale auth key or file is provided
+			switch {
+			case tailscaleAuthKey != "" && tailscaleAuthKeyFile != "":
+				return fmt.Errorf("only one of --tailscale-auth-key or --tailscale-auth-key-file can be provided")
+			case tailscaleAuthKey == "" && tailscaleAuthKeyFile == "":
+				logentry.Debugf("No tailscale auth key provided, will not join a tailnet")
+			case tailscaleAuthKey != "":
+				logentry.Debugf("Using tailscale auth key provided in command line")
+			case tailscaleAuthKeyFile != "":
+				logentry.Debugf("Loading tailscale auth key from %s", tailscaleAuthKeyFile)
+				key, err := os.ReadFile(tailscaleAuthKeyFile)
+				if err != nil {
+					return fmt.Errorf("failed to load tailscale auth key at %s: %w", tailscaleAuthKeyFile, err)
+				}
+				tailscaleAuthKey = strings.TrimSuffix(string(key), "\n")
+			}
+
 			ctx := context.Background()
 
 			c := cluster.New(logentry, oxideClient, clusterProject,
 				controlPlanePrefix, workerPrefix, int(controlPlaneCount), int(workerCount),
-				cluster.NodeSpec{Image: cluster.Image{Name: controlPlaneImageName, Source: controlPlaneImageSource, Blocksize: controlPlaneImageBlocksize}, MemoryGB: int(controlPlaneMemory), CPUCount: int(controlPlaneCPU), ExternalIP: controlPlaneExternalIP, ExtraDiskSize: int(controlPlaneExtraDiskSizeGB * cluster.GB)},
-				cluster.NodeSpec{Image: cluster.Image{Name: workerImageName, Source: workerImageSource, Blocksize: workerImageBlocksize}, MemoryGB: int(workerMemory), CPUCount: int(workerCPU), ExternalIP: workerExternalIP, ExtraDiskSize: int(workerExtraDiskSizeGB * cluster.GB)},
+				cluster.NodeSpec{Image: cluster.Image{Name: controlPlaneImageName, Source: controlPlaneImageSource, Blocksize: controlPlaneImageBlocksize}, MemoryGB: int(controlPlaneMemory), CPUCount: int(controlPlaneCPU), ExternalIP: controlPlaneExternalIP, ExtraDiskSize: int(controlPlaneExtraDiskSizeGB * cluster.GB), TailscaleAuthKey: tailscaleAuthKey, TailscaleTag: tailscaleTag},
+				cluster.NodeSpec{Image: cluster.Image{Name: workerImageName, Source: workerImageSource, Blocksize: workerImageBlocksize}, MemoryGB: int(workerMemory), CPUCount: int(workerCPU), ExternalIP: workerExternalIP, ExtraDiskSize: int(workerExtraDiskSizeGB * cluster.GB), TailscaleAuthKey: tailscaleAuthKey, TailscaleTag: tailscaleTag},
 				imageParallelism,
 				controlPlaneSecret, kubeconfig, pubkey,
 				time.Duration(clusterInitWait)*time.Minute,
@@ -219,6 +239,9 @@ func rootCmd() (*cobra.Command, error) {
 	cmd.Flags().BoolVar(&runOnce, "runonce", false, "Run the server once and then exit, do not run a long-running control loop for checking the controller or listening for API calls")
 	cmd.Flags().IntVar(&controlLoopMins, "control-loop-mins", 5, "How often to run the control loop, in minutes")
 	cmd.Flags().IntVar(&imageParallelism, "image-parallelism", 1, "How many parallel threads to use for uploading images to the sled")
+	cmd.Flags().StringVar(&tailscaleAuthKey, "tailscale-auth-key", "", "Tailscale auth key to use for authentication, if none provided, will not join a tailnet; can provide one of --tailscale-auth-key or --tailscale-auth-key-file, or neither, but not both")
+	cmd.Flags().StringVar(&tailscaleAuthKeyFile, "tailscale-auth-key-file", "", "Tailscale auth key to use for authentication, if none provided, will not join a tailnet; can provide one of --tailscale-auth-key or --tailscale-auth-key-file, or neither, but not both")
+	cmd.Flags().StringVar(&tailscaleTag, "tailscale-tag", "ainekko-k8s-node", "Tailscale tag to apply to nodes. Only used if --tailscale-auth-key or --tailscale-auth-key-file is provided. Must exist as a valid tag in your tailnet.")
 
 	return cmd, nil
 }
