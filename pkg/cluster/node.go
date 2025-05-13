@@ -48,10 +48,14 @@ func CreateInstance(ctx context.Context, client *oxide.Client, projectID, instan
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate random string: %w", err)
 	}
+	hostnameSuffix, err := util.RandomString(8, true)
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate random string: %w", err)
+	}
 	createBody := &oxide.InstanceCreate{
 		Name:        oxide.Name(instanceName),
 		Description: instanceName,
-		Hostname:    oxide.Hostname(instanceName),
+		Hostname:    oxide.Hostname(fmt.Sprintf("%s-%s", instanceName, hostnameSuffix)),
 		Memory:      oxide.ByteCount(spec.MemoryGB * GB),
 		Ncpus:       oxide.InstanceCpuCount(spec.CPUCount),
 		NetworkInterfaces: oxide.InstanceNetworkInterfaceAttachment{
@@ -102,6 +106,46 @@ func GenerateCloudConfig(nodeType string, initCluster bool, controlPlaneIP, join
 		port    int = 6443
 	)
 
+	cfg := CloudConfig{}
+
+	// SSH access
+	cfg.AllowPublicSSHKeys = true
+	cfg.SSHPWAuth = false
+	cfg.DisableRoot = false
+	if len(pubkey) > 0 {
+		cfg.Users = []User{
+			{Name: "root", Shell: "/bin/bash", SSHAuthorizedKeys: pubkey},
+		}
+	}
+
+	// tailscale
+	// if provided, add it to the config; this MUST come before k3s so that the IP is added
+	if tailscaleAuthKey != "" {
+		cfg.RunCmd = append(cfg.RunCmd, []string{
+			"curl -fsSL https://pkgs.tailscale.com/stable/debian/bullseye.noarmor.gpg | sudo tee /usr/share/keyrings/tailscale-archive-keyring.gpg >/dev/null",
+			"curl -fsSL https://pkgs.tailscale.com/stable/debian/bullseye.tailscale-keyring.list | sudo tee /etc/apt/sources.list.d/tailscale.list",
+			"sudo apt-get update -y",
+			"sudo apt-get install -y tailscale",
+			"systemctl enable tailscaled",
+			"systemctl start tailscaled",
+			fmt.Sprintf("tailscale up --advertise-tags=tag:%s --authkey %s", tailscaleTag, tailscaleAuthKey),
+			"TAILSCALE_IP=$(tailscale ip --4)",
+		})
+	}
+
+	// if extra disk provided, add it to the config
+	if extraDisk != "" {
+		// create a UUID for the filesystem
+		uid := uuid.New()
+		cfg.RunCmd = append(cfg.RunCmd, []string{
+			fmt.Sprintf("mkdir -p %s", extraMount),
+			// attempt to mount, only format if mount fails
+			fmt.Sprintf("mount %s %s || (mkfs.ext4 -U %s %s && mount %s %s)", extraDisk, extraMount, uid, extraDisk, extraDisk, extraMount),
+			fmt.Sprintf("echo 'UUID=%s %s ext4 defaults 0 0' | tee -a /etc/fstab", uid, extraMount),
+		})
+	}
+
+	// k3s
 	switch nodeType {
 	case "server":
 		k3sArgs = append(k3sArgs, "server")
@@ -114,6 +158,10 @@ func GenerateCloudConfig(nodeType string, initCluster bool, controlPlaneIP, join
 			k3sArgs = append(k3sArgs, fmt.Sprintf("--token %s", joinToken))
 		}
 		k3sArgs = append(k3sArgs, "--tls-san ${PRIVATE_IP} --tls-san ${PUBLIC_IP}")
+		// add the tailscale IP if provided
+		if tailscaleAuthKey != "" {
+			k3sArgs = append(k3sArgs, "--tls-san ${TAILSCALE_IP}")
+		}
 	case "agent":
 		k3sArgs = append(k3sArgs, "agent")
 		k3sArgs = append(k3sArgs, fmt.Sprintf("--server https://%s:%d", controlPlaneIP, port))
@@ -121,45 +169,13 @@ func GenerateCloudConfig(nodeType string, initCluster bool, controlPlaneIP, join
 	default:
 		return nil, fmt.Errorf("unknown node type: %s", nodeType)
 	}
-	cfg := CloudConfig{}
-	if len(pubkey) > 0 {
-		cfg.Users = []User{
-			{Name: "root", Shell: "/bin/bash", SSHAuthorizedKeys: pubkey},
-		}
-	}
-	cfg.RunCmd = MultiLineStrings{
-		{
-			"PRIVATE_IP=$(hostname -I | awk '{print $1}')",
-			"PUBLIC_IP=$(curl -s https://ifconfig.me)",
-			fmt.Sprintf("curl -sfL https://get.k3s.io | sh -s - %s", strings.Join(k3sArgs, " ")),
-		},
-	}
-	cfg.AllowPublicSSHKeys = true
-	cfg.SSHPWAuth = false
-	cfg.DisableRoot = false
-	// if tailscale provided, add it to the config
-	if tailscaleAuthKey != "" {
-		cfg.RunCmd = append(cfg.RunCmd, []string{
-			"curl -fsSL https://pkgs.tailscale.com/stable/debian/bullseye.noarmor.gpg | sudo tee /usr/share/keyrings/tailscale-archive-keyring.gpg >/dev/null",
-			"curl -fsSL https://pkgs.tailscale.com/stable/debian/bullseye.tailscale-keyring.list | sudo tee /etc/apt/sources.list.d/tailscale.list",
-			"sudo apt-get update -y",
-			"sudo apt-get install -y tailscale",
-			"systemctl enable tailscaled",
-			"systemctl start tailscaled",
-			fmt.Sprintf("tailscale up --advertise-tags=tag:%s --authkey %s", tailscaleTag, tailscaleAuthKey),
-		})
-	}
-	// if extra disk provided, add it to the config
-	if extraDisk != "" {
-		// create a UUID for the filesystem
-		uid := uuid.New()
-		cfg.RunCmd = append(cfg.RunCmd, []string{
-			fmt.Sprintf("mkdir -p %s", extraMount),
-			// attempt to mount, only format if mount fails
-			fmt.Sprintf("mount %s %s || (mkfs.ext4 -U %s %s && mount %s %s)", extraDisk, extraMount, uid, extraDisk, extraDisk, extraMount),
-			fmt.Sprintf("echo 'UUID=%s %s ext4 defaults 0 0' | tee -a /etc/fstab", uid, extraMount),
-		})
-	}
+	cfg.RunCmd = append(cfg.RunCmd, []string{
+		"PRIVATE_IP=$(hostname -I | awk '{print $1}')",
+		"PUBLIC_IP=$(curl -s https://ifconfig.me)",
+		fmt.Sprintf("curl -sfL https://get.k3s.io | sh -s - %s", strings.Join(k3sArgs, " ")),
+	})
+
+	// encode
 	var buf bytes.Buffer
 	enc := yaml.NewEncoder(&buf)
 	enc.SetIndent(2)

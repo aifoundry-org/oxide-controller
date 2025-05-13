@@ -58,8 +58,9 @@ func rootCmd() (*cobra.Command, error) {
 		workerRootDiskSizeGB        uint
 		controlPlaneRootDiskSizeGB  uint
 		tailscaleAuthKey            string
-		tailscaleAuthKeyFile        string
+		tailscaleAPIKey             string
 		tailscaleTag                string
+		tailscaleTailnet            string
 
 		logger = log.New()
 	)
@@ -119,21 +120,36 @@ func rootCmd() (*cobra.Command, error) {
 				return fmt.Errorf("failed to create Oxide API client: %v", err)
 			}
 
-			// make sure only one of the tailscale auth key or file is provided
-			switch {
-			case tailscaleAuthKey != "" && tailscaleAuthKeyFile != "":
-				return fmt.Errorf("only one of --tailscale-auth-key or --tailscale-auth-key-file can be provided")
-			case tailscaleAuthKey == "" && tailscaleAuthKeyFile == "":
-				logentry.Debugf("No tailscale auth key provided, will not join a tailnet")
-			case tailscaleAuthKey != "":
-				logentry.Debugf("Using tailscale auth key provided in command line")
-			case tailscaleAuthKeyFile != "":
+			// if tailscaleAuthKey starts with file: then it is a path
+			if strings.HasPrefix(tailscaleAuthKey, "file:") {
+				tailscaleAuthKeyFile := strings.TrimPrefix(tailscaleAuthKey, "file:")
+				tailscaleAuthKey = ""
 				logentry.Debugf("Loading tailscale auth key from %s", tailscaleAuthKeyFile)
 				key, err := os.ReadFile(tailscaleAuthKeyFile)
 				if err != nil {
 					return fmt.Errorf("failed to load tailscale auth key at %s: %w", tailscaleAuthKeyFile, err)
 				}
 				tailscaleAuthKey = strings.TrimSuffix(string(key), "\n")
+			}
+
+			if strings.HasPrefix(tailscaleAPIKey, "file:") {
+				tailscaleAPIKeyFile := strings.TrimPrefix(tailscaleAPIKey, "file:")
+				tailscaleAPIKey = ""
+				logentry.Debugf("Loading tailscale api key from %s", tailscaleAPIKeyFile)
+				key, err := os.ReadFile(tailscaleAPIKeyFile)
+				if err != nil {
+					return fmt.Errorf("failed to load tailscale api key at %s: %w", tailscaleAPIKeyFile, err)
+				}
+				tailscaleAPIKey = strings.TrimSuffix(string(key), "\n")
+			}
+
+			if tailscaleAuthKey != "" {
+				if tailscaleAPIKey == "" {
+					return fmt.Errorf("tailscale api key must be provided if using tailscale auth key")
+				}
+				if tailscaleTailnet == "" {
+					return fmt.Errorf("tailscale tailnet must be provided if using tailscale auth key")
+				}
 			}
 
 			ctx := context.Background()
@@ -146,6 +162,8 @@ func rootCmd() (*cobra.Command, error) {
 				controlPlaneSecret, kubeconfig, pubkey,
 				time.Duration(clusterInitWait)*time.Minute,
 				kubeconfigOverwrite,
+				tailscaleAPIKey,
+				tailscaleTailnet,
 			)
 			// we perform 2 execution loops of the cluster execute function:
 			// - the first one is to create the cluster and get the kubeconfig
@@ -243,9 +261,10 @@ func rootCmd() (*cobra.Command, error) {
 	cmd.Flags().BoolVar(&runOnce, "runonce", false, "Run the server once and then exit, do not run a long-running control loop for checking the controller or listening for API calls")
 	cmd.Flags().IntVar(&controlLoopMins, "control-loop-mins", 5, "How often to run the control loop, in minutes")
 	cmd.Flags().IntVar(&imageParallelism, "image-parallelism", 1, "How many parallel threads to use for uploading images to the sled")
-	cmd.Flags().StringVar(&tailscaleAuthKey, "tailscale-auth-key", "", "Tailscale auth key to use for authentication, if none provided, will not join a tailnet; can provide one of --tailscale-auth-key or --tailscale-auth-key-file, or neither, but not both")
-	cmd.Flags().StringVar(&tailscaleAuthKeyFile, "tailscale-auth-key-file", "", "Tailscale auth key to use for authentication, if none provided, will not join a tailnet; can provide one of --tailscale-auth-key or --tailscale-auth-key-file, or neither, but not both")
-	cmd.Flags().StringVar(&tailscaleTag, "tailscale-tag", "ainekko-k8s-node", "Tailscale tag to apply to nodes. Only used if --tailscale-auth-key or --tailscale-auth-key-file is provided. Must exist as a valid tag in your tailnet.")
+	cmd.Flags().StringVar(&tailscaleAuthKey, "tailscale-auth-key", "", "Tailscale auth key to use for authentication, if none provided, will not join a tailnet; if starts with 'file:' then will read the key from the file")
+	cmd.Flags().StringVar(&tailscaleAPIKey, "tailscale-api-key", "", "Tailscale api key to use for listing tailnet nodes; if starts with 'file:' then will read the key from the file")
+	cmd.Flags().StringVar(&tailscaleTag, "tailscale-tag", "ainekko-k8s-node", "Tailscale tag to apply to nodes. Only used if --tailscale-auth-key is provided. Must exist as a valid tag in your tailnet.")
+	cmd.Flags().StringVar(&tailscaleTailnet, "tailscale-tailnet", "", "Tailscale tailnet to use to look for nodes joined to the tailnet. Must be provided if --tailscale-auth-key is provided.")
 
 	return cmd, nil
 }
