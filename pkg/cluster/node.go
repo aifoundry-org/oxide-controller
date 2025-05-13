@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/aifoundry-org/oxide-controller/pkg/util"
+	"github.com/google/uuid"
 	"github.com/oxidecomputer/oxide.go/oxide"
 	log "github.com/sirupsen/logrus"
 	"gopkg.in/yaml.v3"
@@ -17,7 +18,8 @@ import (
 )
 
 const (
-	extraDisk = "/dev/nvme1n1"
+	extraDisk  = "/dev/nvme1n1"
+	extraMount = "/data"
 )
 
 func CreateInstance(ctx context.Context, client *oxide.Client, projectID, instanceName string, spec NodeSpec, cloudConfig string) (*oxide.Instance, error) {
@@ -147,6 +149,17 @@ func GenerateCloudConfig(nodeType string, initCluster bool, controlPlaneIP, join
 			fmt.Sprintf("tailscale up --advertise-tags=tag:%s --authkey %s", tailscaleTag, tailscaleAuthKey),
 		})
 	}
+	// if extra disk provided, add it to the config
+	if extraDisk != "" {
+		// create a UUID for the filesystem
+		uid := uuid.New()
+		cfg.RunCmd = append(cfg.RunCmd, []string{
+			fmt.Sprintf("mkdir -p %s", extraMount),
+			// attempt to mount, only format if mount fails
+			fmt.Sprintf("mount %s %s || (mkfs.ext4 -U %s %s && mount %s %s)", extraDisk, extraMount, uid, extraDisk, extraDisk, extraMount),
+			fmt.Sprintf("echo 'UUID=%s %s ext4 defaults 0 0' | tee -a /etc/fstab", uid, extraMount),
+		})
+	}
 	var buf bytes.Buffer
 	enc := yaml.NewEncoder(&buf)
 	enc.SetIndent(2)
@@ -253,7 +266,7 @@ func (c *Cluster) EnsureWorkerNodes(ctx context.Context) ([]oxide.Instance, erro
 		pubkeys = append(pubkeys, string(pubkey))
 	}
 	var extraNodeDisk string
-	if c.controlPlaneSpec.ExtraDiskSize > 0 {
+	if c.workerSpec.ExtraDiskSize > 0 {
 		extraNodeDisk = extraDisk
 	}
 	cloudConfig, err := GenerateCloudConfigB64("agent", false, c.controlPlaneIP, joinToken, pubkeys, extraNodeDisk, c.workerSpec.TailscaleAuthKey, c.workerSpec.TailscaleTag)
