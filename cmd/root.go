@@ -55,6 +55,8 @@ func rootCmd() (*cobra.Command, error) {
 		imageParallelism            int
 		workerExtraDiskSizeGB       uint
 		controlPlaneExtraDiskSizeGB uint
+		workerRootDiskSizeGB        uint
+		controlPlaneRootDiskSizeGB  uint
 		tailscaleAuthKey            string
 		tailscaleAuthKeyFile        string
 		tailscaleTag                string
@@ -138,8 +140,8 @@ func rootCmd() (*cobra.Command, error) {
 
 			c := cluster.New(logentry, oxideClient, clusterProject,
 				controlPlanePrefix, workerPrefix, int(controlPlaneCount), int(workerCount),
-				cluster.NodeSpec{Image: cluster.Image{Name: controlPlaneImageName, Source: controlPlaneImageSource, Blocksize: controlPlaneImageBlocksize}, MemoryGB: int(controlPlaneMemory), CPUCount: int(controlPlaneCPU), ExternalIP: controlPlaneExternalIP, ExtraDiskSize: int(controlPlaneExtraDiskSizeGB * cluster.GB), TailscaleAuthKey: tailscaleAuthKey, TailscaleTag: tailscaleTag},
-				cluster.NodeSpec{Image: cluster.Image{Name: workerImageName, Source: workerImageSource, Blocksize: workerImageBlocksize}, MemoryGB: int(workerMemory), CPUCount: int(workerCPU), ExternalIP: workerExternalIP, ExtraDiskSize: int(workerExtraDiskSizeGB * cluster.GB), TailscaleAuthKey: tailscaleAuthKey, TailscaleTag: tailscaleTag},
+				cluster.NodeSpec{Image: cluster.Image{Name: controlPlaneImageName, Source: controlPlaneImageSource, Blocksize: controlPlaneImageBlocksize}, MemoryGB: int(controlPlaneMemory), CPUCount: int(controlPlaneCPU), ExternalIP: controlPlaneExternalIP, RootDiskSize: int(controlPlaneRootDiskSizeGB * cluster.GB), ExtraDiskSize: int(controlPlaneExtraDiskSizeGB * cluster.GB), TailscaleAuthKey: tailscaleAuthKey, TailscaleTag: tailscaleTag},
+				cluster.NodeSpec{Image: cluster.Image{Name: workerImageName, Source: workerImageSource, Blocksize: workerImageBlocksize}, MemoryGB: int(workerMemory), CPUCount: int(workerCPU), ExternalIP: workerExternalIP, RootDiskSize: int(workerRootDiskSizeGB * cluster.GB), ExtraDiskSize: int(workerExtraDiskSizeGB * cluster.GB), TailscaleAuthKey: tailscaleAuthKey, TailscaleTag: tailscaleTag},
 				imageParallelism,
 				controlPlaneSecret, kubeconfig, pubkey,
 				time.Duration(clusterInitWait)*time.Minute,
@@ -220,6 +222,8 @@ func rootCmd() (*cobra.Command, error) {
 	cmd.Flags().StringVar(&workerImageName, "worker-image-name", "debian-12-cloud", "Image to use for worker nodes")
 	cmd.Flags().IntVar(&workerImageBlocksize, "worker-image-blocksize", defaultBlocksize, "Blocksize to use for worker images")
 	cmd.Flags().StringVar(&workerImageSource, "worker-image-source", "https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-genericcloud-amd64.raw", "Image to use for worker instances")
+	cmd.Flags().UintVar(&workerRootDiskSizeGB, "worker-root-disk-size", 0, "Size of root disk to attach to worker nodes, in GB; must be at least as large as the image size")
+	cmd.Flags().UintVar(&controlPlaneRootDiskSizeGB, "control-plane-root-disk-size", 0, "Size of root disk to attach to control plane nodes, in GB; must be at least as large as the image size")
 	cmd.Flags().UintVar(&workerExtraDiskSizeGB, "worker-extra-disk-size", 0, "Size of extra disk to attach to worker nodes, in GB. Leave as 0 for no extra disk.")
 	cmd.Flags().UintVar(&controlPlaneExtraDiskSizeGB, "control-plane-extra-disk-size", 0, "Size of extra disk to attach to control plane nodes, in GB. Leave as 0 for no extra disk.")
 	cmd.Flags().Uint64Var(&controlPlaneMemory, "control-plane-memory", 4, "Memory to allocate to each control plane node, in GB")

@@ -32,10 +32,26 @@ func (c *Cluster) Execute(ctx context.Context) (newKubeconfig []byte, err error)
 		return nil, fmt.Errorf("expected 2 images, got %d", len(images))
 	}
 	c.logger.Infof("images %v", images)
+
+	// control plane image and root disk size
 	c.controlPlaneSpec.Image = images[0]
-	c.controlPlaneSpec.RootDiskSize = util.RoundUp(images[0].Size, GB)
+	minSize := util.RoundUp(c.controlPlaneSpec.Image.Size, GB)
+	if c.controlPlaneSpec.RootDiskSize == 0 {
+		c.controlPlaneSpec.RootDiskSize = minSize
+	}
+	if c.controlPlaneSpec.RootDiskSize < minSize {
+		return nil, fmt.Errorf("control plane root disk size %d is less than minimum image size %d", c.controlPlaneSpec.RootDiskSize, minSize)
+	}
+
+	// worker image and root disk size
 	c.workerSpec.Image = images[1]
-	c.workerSpec.RootDiskSize = util.RoundUp(images[0].Size, GB)
+	minSize = util.RoundUp(c.workerSpec.Image.Size, GB)
+	if c.workerSpec.RootDiskSize == 0 {
+		c.workerSpec.RootDiskSize = minSize
+	}
+	if c.workerSpec.RootDiskSize < minSize {
+		return nil, fmt.Errorf("worker root disk size %d is less than minimum image size %d", c.workerSpec.RootDiskSize, minSize)
+	}
 
 	newKubeconfig, err = c.ensureClusterExists(ctx)
 	if err != nil {

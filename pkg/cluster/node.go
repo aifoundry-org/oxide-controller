@@ -40,7 +40,7 @@ func CreateInstance(ctx context.Context, client *oxide.Client, projectID, instan
 				BlockSize: blockSize,
 			},
 			Size:        oxide.ByteCount(spec.ExtraDiskSize),
-			Name:        oxide.Name(fmt.Sprintf("%s-%s-disk-1", prefix, instanceName)),
+			Name:        oxide.Name(fmt.Sprintf("d-%s-%s-disk-1", prefix, instanceName)),
 			Description: instanceName,
 		})
 	}
@@ -65,7 +65,7 @@ func CreateInstance(ctx context.Context, client *oxide.Client, projectID, instan
 				BlockSize: blockSize,
 			},
 			Size:        oxide.ByteCount(spec.RootDiskSize),
-			Name:        oxide.Name(fmt.Sprintf("%s-%s", prefix, instanceName)),
+			Name:        oxide.Name(fmt.Sprintf("d-%s-%s", prefix, instanceName)),
 			Description: instanceName,
 		},
 
