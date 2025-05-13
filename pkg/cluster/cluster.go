@@ -3,12 +3,14 @@ package cluster
 import (
 	"context"
 	"fmt"
+	"net"
 	"regexp"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/aifoundry-org/oxide-controller/pkg/util"
+	"tailscale.com/client/tailscale/v2"
 
 	"github.com/oxidecomputer/oxide.go/oxide"
 	log "github.com/sirupsen/logrus"
@@ -30,10 +32,12 @@ type Cluster struct {
 	kubeconfig, userPubkey       []byte
 	controlPlaneIP               string
 	imageParallelism             int
+	tailscaleAPIKey              string
+	tailscaleTailnet             string
 }
 
 // New creates a new Cluster instance
-func New(logger *log.Entry, client *oxide.Client, projectID string, controlPlanePrefix, workerPrefix string, controlPlaneCount, workerCount int, controlPlaneSpec, workerSpec NodeSpec, imageParallelism int, secretName string, kubeconfig, pubkey []byte, clusterInitWait time.Duration, kubeconfigOverwrite bool) *Cluster {
+func New(logger *log.Entry, client *oxide.Client, projectID string, controlPlanePrefix, workerPrefix string, controlPlaneCount, workerCount int, controlPlaneSpec, workerSpec NodeSpec, imageParallelism int, secretName string, kubeconfig, pubkey []byte, clusterInitWait time.Duration, kubeconfigOverwrite bool, tailscaleAPIKey, tailscaleTailnet string) *Cluster {
 	c := &Cluster{
 		logger:              logger.WithField("component", "cluster"),
 		client:              client,
@@ -48,6 +52,8 @@ func New(logger *log.Entry, client *oxide.Client, projectID string, controlPlane
 		clusterInitWait:     clusterInitWait,
 		kubeconfigOverwrite: kubeconfigOverwrite,
 		imageParallelism:    imageParallelism,
+		tailscaleAPIKey:     tailscaleAPIKey,
+		tailscaleTailnet:    tailscaleTailnet,
 	}
 	c.workerCount = workerCount
 	c.controlPlaneCount = controlPlaneCount
@@ -146,6 +152,7 @@ func (c *Cluster) ensureClusterExists(ctx context.Context) (newKubeconfig []byte
 			return nil, fmt.Errorf("created 0 control plane nodes")
 		}
 		hostid := instances[0].Id
+		hostname := instances[0].Hostname
 		// if the control plane node was not configured to have an external IP,
 		// attach the floating IP to start and use that is the externalIP
 		var (
@@ -197,20 +204,59 @@ func (c *Cluster) ensureClusterExists(ctx context.Context) (newKubeconfig []byte
 			fipAttached = true
 		}
 
+		// if tailscale is used and an external IP is not available, then use that to get onto the control plane node
+		clusterAccessIP := externalIP
+
 		// wait for the control plane node to be up and running
 		timeLeft := c.clusterInitWait
 		for {
-			c.logger.Infof("Waiting %s for control plane node %s to be up and running...", timeLeft, controlPlaneIP)
+			c.logger.Infof("Waiting %s for control plane node to be up and running...", timeLeft)
 			sleepTime := 1 * time.Minute
 			time.Sleep(sleepTime)
 			timeLeft -= sleepTime
-			if isClusterAlive(fmt.Sprintf("https://%s:%d", externalIP, 6443)) {
-				c.logger.Infof("Control plane at %s is up and running", externalIP)
+
+			if c.tailscaleAPIKey != "" {
+				c.logger.Infof("Checking if control plane node has joined tailnet")
+				client := &tailscale.Client{
+					Tailnet: c.tailscaleTailnet,
+					APIKey:  c.tailscaleAPIKey,
+				}
+				ctx := context.Background()
+				devices, err := client.Devices().List(ctx)
+				if err != nil {
+					return nil, fmt.Errorf("failed to list tailscale devices: %w", err)
+				}
+				// find the most recent device
+				var validIP, validHostname string
+				for _, device := range devices {
+					if device.Hostname == hostname {
+						c.logger.Debugf("Found tailscale device %s matches our hostname %s", device.Hostname, hostname)
+						for _, addr := range device.Addresses {
+							// check if it is a valid IPv4 address
+							if isCanonicalIPv4(addr) {
+								validIP = addr
+								validHostname = device.Hostname
+								break
+							}
+						}
+					}
+				}
+				if validIP == "" {
+					c.logger.Debugf("no valid tailscale device found yet for hostname %s", hostname)
+					continue
+				}
+				c.logger.Debugf("Found tailscale device %s with IP %s", validHostname, validIP)
+				clusterAccessIP = validIP
+				break
+			}
+
+			if isClusterAlive(fmt.Sprintf("https://%s:%d", clusterAccessIP, 6443)) {
+				c.logger.Infof("Control plane at %s is up and running", clusterAccessIP)
 				break
 			}
 			if timeLeft <= 0 {
-				c.logger.Errorf("Control plane at %s did not respond in time, exiting", externalIP)
-				return nil, fmt.Errorf("control plane at %s did not respond in time", externalIP)
+				c.logger.Errorf("Control plane at %s did not respond in time, exiting", clusterAccessIP)
+				return nil, fmt.Errorf("control plane at %s did not respond in time", clusterAccessIP)
 			}
 		}
 		// attach the floating IP to the control plane node, if not done already
@@ -228,7 +274,7 @@ func (c *Cluster) ensureClusterExists(ctx context.Context) (newKubeconfig []byte
 		}
 
 		// get the join token and save it to our secrets map
-		joinToken, err := util.RunSSHCommand("root", fmt.Sprintf("%s:22", externalIP), priv, "cat /var/lib/rancher/k3s/server/node-token")
+		joinToken, err := util.RunSSHCommand("root", fmt.Sprintf("%s:22", clusterAccessIP), priv, "cat /var/lib/rancher/k3s/server/node-token")
 		if err != nil {
 			return nil, fmt.Errorf("failed to run command to retrieve join token on control plane node: %w", err)
 		}
@@ -243,7 +289,7 @@ func (c *Cluster) ensureClusterExists(ctx context.Context) (newKubeconfig []byte
 		}
 
 		// get the kubeconfig
-		kubeconfig, err = util.RunSSHCommand("root", fmt.Sprintf("%s:22", externalIP), priv, "cat /etc/rancher/k3s/k3s.yaml")
+		kubeconfig, err = util.RunSSHCommand("root", fmt.Sprintf("%s:22", clusterAccessIP), priv, "cat /etc/rancher/k3s/k3s.yaml")
 		if err != nil {
 			return nil, fmt.Errorf("failed to run command to retrieve kubeconfig on control plane node: %w", err)
 		}
@@ -253,7 +299,7 @@ func (c *Cluster) ensureClusterExists(ctx context.Context) (newKubeconfig []byte
 		// have to change the kubeconfig to use the floating IP
 		kubeconfigString := string(kubeconfig)
 		re := regexp.MustCompile(`(server:\s*\w+://)(\d+\.\d+\.\d+\.\d+)(:\d+)`)
-		kubeconfigString = re.ReplaceAllString(kubeconfigString, fmt.Sprintf("${1}%s${3}", controlPlaneIP.Ip))
+		kubeconfigString = re.ReplaceAllString(kubeconfigString, fmt.Sprintf("${1}%s${3}", clusterAccessIP))
 		c.kubeconfig = []byte(kubeconfigString)
 
 		// if we have worker node count explicitly defined, save it
@@ -281,4 +327,14 @@ func (c *Cluster) ensureClusterExists(ctx context.Context) (newKubeconfig []byte
 
 	c.logger.Debugf("Completed %d control plane nodes exist with prefix %s", controlPlaneCount, controlPlanePrefix)
 	return c.kubeconfig, nil
+}
+
+func isCanonicalIPv4(s string) bool {
+	ip := net.ParseIP(s)
+	if ip == nil {
+		return false
+	}
+	ipv4 := ip.To4()
+	// Ensure it's truly an IPv4 (not IPv6-mapped) and in canonical form
+	return ipv4 != nil && ipv4.String() == s
 }
