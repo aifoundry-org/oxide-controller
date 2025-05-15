@@ -15,6 +15,7 @@ import (
 	log "github.com/sirupsen/logrus"
 	"gopkg.in/yaml.v3"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/rest"
 )
 
 const (
@@ -309,10 +310,10 @@ func (c *Cluster) GetWorkerNodeCount() (int, error) {
 
 // getNodesKubernetes gets the node names from the cluster
 // Returns a list of node names, first control plane and then worker nodes
-func getNodesKubernetes(ctx context.Context, logger *log.Entry, kubeconfigRaw []byte) ([]string, []string, error) {
-	logger.Debugf("Getting nodes from Kubernetes with kubeconfig size %d", len(kubeconfigRaw))
+func getNodesKubernetes(ctx context.Context, logger *log.Entry, config *rest.Config) ([]string, []string, error) {
+	logger.Debugf("Getting nodes from Kubernetes")
 
-	clientset, err := getClientset(kubeconfigRaw)
+	clientset, err := getClientset(config)
 	if err != nil {
 		return nil, nil, err
 	}

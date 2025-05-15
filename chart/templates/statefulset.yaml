@@ -1,0 +1,41 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: oxide-controller
+  namespace: {{ .Values.namespace }}
+spec:
+  serviceName: oxide-controller
+  replicas: 1
+  selector:
+    matchLabels:
+      app: oxide-controller
+  template:
+    metadata:
+      labels:
+        app: oxide-controller
+    spec:
+      serviceAccountName: oxide-controller
+      priorityClassName: system-cluster-critical
+      tolerations:
+        - key: "node-role.kubernetes.io/control-plane"
+          operator: "Exists"
+          effect: "NoSchedule"
+        - key: "node-role.kubernetes.io/master"
+          operator: "Exists"
+          effect: "NoSchedule"
+        - key: "node.kubernetes.io/not-ready"
+          operator: "Exists"
+          effect: "NoExecute"
+          tolerationSeconds: 300
+        - key: "node.kubernetes.io/unreachable"
+          operator: "Exists"
+          effect: "NoExecute"
+          tolerationSeconds: 300
+      containers:
+        - name: controller
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          ports:
+            - containerPort: {{ .Values.image.port }}
+          env:
+            - name: SECRET_NAME
+              value: "{{ .Values.secretName }}"

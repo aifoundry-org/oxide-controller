@@ -11,12 +11,13 @@ import (
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
 )
 
 // getSecretValue retrieves a specific value from the secret
-func getSecretValue(ctx context.Context, logger *log.Entry, kubeconfig []byte, secret, key string) ([]byte, error) {
+func getSecretValue(ctx context.Context, apiConfig *rest.Config, logger *log.Entry, namespace, secret, key string) ([]byte, error) {
 	logger.Debugf("Getting secret value for key '%s' from secret '%s'", key, secret)
-	secretData, err := getSecret(ctx, logger, kubeconfig, secret)
+	secretData, err := getSecret(ctx, apiConfig, logger, namespace, secret)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get secret: %w", err)
 	}
@@ -30,7 +31,7 @@ func getSecretValue(ctx context.Context, logger *log.Entry, kubeconfig []byte, s
 
 // GetJoinToken retrieves a new k3s worker join token from the Kubernetes cluster
 func (c *Cluster) GetJoinToken(ctx context.Context) (string, error) {
-	value, err := getSecretValue(ctx, c.logger, c.kubeconfig, c.secretName, secretKeyJoinToken)
+	value, err := getSecretValue(ctx, c.apiConfig, c.logger, c.namespace, c.secretName, secretKeyJoinToken)
 	if err != nil {
 		return "", err
 	}
@@ -42,7 +43,7 @@ func (c *Cluster) GetJoinToken(ctx context.Context) (string, error) {
 
 // GetUserSSHPublicKey retrieves the SSH public key from the Kubernetes cluster
 func (c *Cluster) GetUserSSHPublicKey(ctx context.Context) ([]byte, error) {
-	pubkey, err := getSecretValue(ctx, c.logger, c.kubeconfig, c.secretName, secretKeyUserSSH)
+	pubkey, err := getSecretValue(ctx, c.apiConfig, c.logger, c.namespace, c.secretName, secretKeyUserSSH)
 	if err != nil {
 		return nil, err
 	}
@@ -51,7 +52,7 @@ func (c *Cluster) GetUserSSHPublicKey(ctx context.Context) ([]byte, error) {
 
 // GetWorkerCount retrieves the targeted worker count from the Kubernetes cluster
 func (c *Cluster) GetWorkerCount(ctx context.Context) (int, error) {
-	workerCount, err := getSecretValue(ctx, c.logger, c.kubeconfig, c.secretName, secretKeyWorkerCount)
+	workerCount, err := getSecretValue(ctx, c.apiConfig, c.logger, c.namespace, c.secretName, secretKeyWorkerCount)
 	if err != nil {
 		return 0, err
 	}
@@ -69,7 +70,7 @@ func (c *Cluster) GetWorkerCount(ctx context.Context) (int, error) {
 
 // SetWorkerCount sets the targeted worker count in the Kubernetes cluster
 func (c *Cluster) SetWorkerCount(ctx context.Context, count int) error {
-	secretMap, err := getSecret(ctx, c.logger, c.kubeconfig, c.secretName)
+	secretMap, err := getSecret(ctx, c.apiConfig, c.logger, c.namespace, c.secretName)
 	if err != nil {
 		return fmt.Errorf("failed to get secret: %w", err)
 	}
@@ -81,15 +82,10 @@ func (c *Cluster) SetWorkerCount(ctx context.Context, count int) error {
 }
 
 // getSecret gets the secret with all of our important information
-func getSecret(ctx context.Context, logger *log.Entry, kubeconfigRaw []byte, secret string) (map[string][]byte, error) {
-	logger.Debugf("Getting secret %s with kubeconfig size %d", secret, len(kubeconfigRaw))
-	parts := strings.SplitN(secret, "/", 2)
-	if len(parts) != 2 {
-		return nil, fmt.Errorf("invalid secret format %s, expected <namespace>/<name>", secret)
-	}
-	namespace, name := parts[0], parts[1]
+func getSecret(ctx context.Context, config *rest.Config, logger *log.Entry, namespace, name string) (map[string][]byte, error) {
+	logger.Debugf("Getting secret %s/%s", namespace, name)
 
-	clientset, err := getClientset(kubeconfigRaw)
+	clientset, err := getClientset(config)
 	if err != nil {
 		return nil, err
 	}

@@ -27,7 +27,7 @@ $(BINDIR):
 	@mkdir -p $@
 
 $(CONTROLLER): $(BINDIR)
-	@go build -o $@
+	@go build -o $@ ./cmd/
 
 link: $(CONTROLLER) $(CONTROLLER_GENERIC)
 
