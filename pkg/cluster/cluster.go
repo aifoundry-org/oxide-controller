@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/aifoundry-org/oxide-controller/pkg/util"
+	"k8s.io/client-go/kubernetes"
 	"tailscale.com/client/tailscale/v2"
 
 	"github.com/oxidecomputer/oxide.go/oxide"
@@ -35,6 +36,7 @@ type Cluster struct {
 	imageParallelism             int
 	tailscaleAPIKey              string
 	tailscaleTailnet             string
+	clientset                    *kubernetes.Clientset
 }
 
 // New creates a new Cluster instance
@@ -309,15 +311,22 @@ func (c *Cluster) ensureClusterExists(ctx context.Context) (newKubeconfig []byte
 			secrets[secretKeyWorkerCount] = []byte(fmt.Sprintf("%d", c.workerCount))
 		}
 
+		// get a Kubernetes client
+		clientset, err := getClientset(kubeconfig)
+		if err != nil {
+			return nil, fmt.Errorf("unable to get Kubernetes clientset: %w", err)
+		}
+		c.clientset = clientset
+
 		// ensure we have the namespace we need
 		namespace := c.namespace
-		if err := createNamespace(ctx, namespace, c.kubeconfig); err != nil {
+		if err := createNamespace(ctx, clientset, namespace); err != nil {
 			return nil, fmt.Errorf("failed to create namespace: %w", err)
 		}
 
 		// save the join token, system ssh key pair, user ssh key to the Kubernetes secret
 		c.logger.Debugf("Saving secret %s/%s to Kubernetes", namespace, secretName)
-		if err := saveSecret(ctx, c.logger, namespace, secretName, c.kubeconfig, secrets); err != nil {
+		if err := saveSecret(ctx, clientset, c.logger, namespace, secretName, secrets); err != nil {
 			return nil, fmt.Errorf("failed to save secret: %w", err)
 		}
 

@@ -10,6 +10,7 @@ import (
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes"
 )
 
 // getSecretValue retrieves a specific value from the secret
@@ -73,7 +74,7 @@ func (c *Cluster) SetWorkerCount(ctx context.Context, count int) error {
 		return fmt.Errorf("failed to get secret: %w", err)
 	}
 	secretMap[secretKeyWorkerCount] = []byte(fmt.Sprintf("%d", count))
-	if err := saveSecret(ctx, c.logger, c.namespace, c.secretName, c.kubeconfig, secretMap); err != nil {
+	if err := saveSecret(ctx, c.clientset, c.logger, c.namespace, c.secretName, secretMap); err != nil {
 		return fmt.Errorf("failed to save secret: %w", err)
 	}
 	return nil
@@ -103,13 +104,10 @@ func getSecret(ctx context.Context, logger *log.Entry, kubeconfigRaw []byte, sec
 }
 
 // saveSecret save a secret to the Kubernetes cluster
-func saveSecret(ctx context.Context, logger *log.Entry, namespace, name string, kubeconfig []byte, data map[string][]byte) error {
-	logger.Debugf("Saving secret %s with kubeconfig size %d and keymap size %d", name, len(kubeconfig), len(data))
+func saveSecret(ctx context.Context, clientset *kubernetes.Clientset, logger *log.Entry, namespace, name string, data map[string][]byte) error {
+	logger.Debugf("Saving secret %s with keymap size %d", name, len(data))
 
-	clientset, err := getClientset(kubeconfig)
-	if err != nil {
-		return err
-	}
+	secretsClient := clientset.CoreV1().Secrets(namespace)
 
 	// Prepare the secret object
 	secret := &v1.Secret{
@@ -121,10 +119,8 @@ func saveSecret(ctx context.Context, logger *log.Entry, namespace, name string, 
 		Type: v1.SecretTypeOpaque,
 	}
 
-	secretsClient := clientset.CoreV1().Secrets(namespace)
-
 	// Check if the secret exists
-	_, err = secretsClient.Get(context.TODO(), name, metav1.GetOptions{})
+	_, err := secretsClient.Get(context.TODO(), name, metav1.GetOptions{})
 	if err != nil {
 		if errors.IsNotFound(err) {
 			// Create new secret
