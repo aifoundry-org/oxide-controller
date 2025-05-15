@@ -7,19 +7,15 @@ import (
 	v1 "k8s.io/api/core/v1"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes"
 )
 
 // createNamespace ensures a namespace exists or creates it.
-func createNamespace(ctx context.Context, namespace string, kubeconfig []byte) error {
-	clientset, err := getClientset(kubeconfig)
-	if err != nil {
-		return fmt.Errorf("failed to get clientset: %w", err)
-	}
-
+func createNamespace(ctx context.Context, clientset *kubernetes.Clientset, namespace string) error {
 	nsClient := clientset.CoreV1().Namespaces()
 
 	// Check if the namespace already exists
-	_, err = nsClient.Get(ctx, namespace, metav1.GetOptions{})
+	_, err := nsClient.Get(ctx, namespace, metav1.GetOptions{})
 	if err == nil {
 		// Already exists
 		return nil
