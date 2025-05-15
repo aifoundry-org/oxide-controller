@@ -12,7 +12,7 @@ WORKDIR /app
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
-RUN make install TARGET=/oxide-controller OS=$(TARGETOS) ARCH=$(TARGETARCH)
+RUN make install TARGET=/oxide-controller OS=${TARGETOS} ARCH=${TARGETARCH}
 
 FROM scratch
 COPY --from=build /oxide-controller /oxide-controller
