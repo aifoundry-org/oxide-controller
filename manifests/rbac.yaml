@@ -1,0 +1,30 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: oxide-controller
+  namespace: oxide-controller-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: oxide-controller
+  namespace: oxide-controller-system
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    resourceNames: ["oxide-controller-secret"]
+    verbs: ["get", "update", "patch", "create"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: oxide-controller
+  namespace: oxide-controller-system
+subjects:
+  - kind: ServiceAccount
+    name: oxide-controller
+    namespace: oxide-controller-system
+roleRef:
+  kind: Role
+  name: oxide-controller
+  apiGroup: rbac.authorization.k8s.io

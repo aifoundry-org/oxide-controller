@@ -1,0 +1,6 @@
+namespace: oxide-controller-system
+secretName: oxide-controller-secret
+image:
+  repository: aifoundryorg/oxide-controller
+  tag: latest
+  port: 8080

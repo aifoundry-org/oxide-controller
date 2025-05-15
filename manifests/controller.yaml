@@ -1,0 +1,54 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: oxide-controller
+  namespace: oxide-controller-system
+spec:
+  serviceName: oxide-controller
+  replicas: 1
+  selector:
+    matchLabels:
+      app: oxide-controller
+  template:
+    metadata:
+      labels:
+        app: oxide-controller
+    spec:
+      serviceAccountName: oxide-controller
+      priorityClassName: system-cluster-critical
+      tolerations:
+        - key: "node-role.kubernetes.io/control-plane"
+          operator: "Exists"
+          effect: "NoSchedule"
+        - key: "node-role.kubernetes.io/master"
+          operator: "Exists"
+          effect: "NoSchedule"
+        - key: "node.kubernetes.io/not-ready"
+          operator: "Exists"
+          effect: "NoExecute"
+          tolerationSeconds: 300
+        - key: "node.kubernetes.io/unreachable"
+          operator: "Exists"
+          effect: "NoExecute"
+          tolerationSeconds: 300
+      containers:
+        - name: controller
+          image: your-registry/oxide-controller:latest
+          ports:
+            - containerPort: 8080  # Replace with your actual listening port
+          env:
+            - name: SECRET_NAME
+              value: "oxide-controller-secret"  # You can override this via CLI args if needed
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: oxide-controller
+  namespace: oxide-controller-system
+spec:
+  selector:
+    app: oxide-controller
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8080

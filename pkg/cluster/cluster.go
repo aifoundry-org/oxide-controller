@@ -11,6 +11,7 @@ import (
 
 	"github.com/aifoundry-org/oxide-controller/pkg/util"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
 	"tailscale.com/client/tailscale/v2"
 
 	"github.com/oxidecomputer/oxide.go/oxide"
@@ -37,10 +38,12 @@ type Cluster struct {
 	tailscaleAPIKey              string
 	tailscaleTailnet             string
 	clientset                    *kubernetes.Clientset
+	apiConfig                    *rest.Config
+	ociImage                     string
 }
 
 // New creates a new Cluster instance
-func New(logger *log.Entry, client *oxide.Client, projectID string, controlPlanePrefix, workerPrefix string, controlPlaneCount, workerCount int, controlPlaneSpec, workerSpec NodeSpec, imageParallelism int, namespace, secretName string, kubeconfig, pubkey []byte, clusterInitWait time.Duration, kubeconfigOverwrite bool, tailscaleAPIKey, tailscaleTailnet string) *Cluster {
+func New(logger *log.Entry, client *oxide.Client, projectID string, controlPlanePrefix, workerPrefix string, controlPlaneCount, workerCount int, controlPlaneSpec, workerSpec NodeSpec, imageParallelism int, namespace, secretName string, kubeconfig, pubkey []byte, clusterInitWait time.Duration, kubeconfigOverwrite bool, tailscaleAPIKey, tailscaleTailnet, OCIimage string) *Cluster {
 	c := &Cluster{
 		logger:              logger.WithField("component", "cluster"),
 		client:              client,
@@ -58,6 +61,7 @@ func New(logger *log.Entry, client *oxide.Client, projectID string, controlPlane
 		imageParallelism:    imageParallelism,
 		tailscaleAPIKey:     tailscaleAPIKey,
 		tailscaleTailnet:    tailscaleTailnet,
+		ociImage:            OCIimage,
 	}
 	c.workerCount = workerCount
 	c.controlPlaneCount = controlPlaneCount
@@ -312,7 +316,12 @@ func (c *Cluster) ensureClusterExists(ctx context.Context) (newKubeconfig []byte
 		}
 
 		// get a Kubernetes client
-		clientset, err := getClientset(kubeconfig)
+		apiConfig, err := getRestConfig(kubeconfig)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get rest config: %w", err)
+		}
+		c.apiConfig = apiConfig
+		clientset, err := getClientset(apiConfig)
 		if err != nil {
 			return nil, fmt.Errorf("unable to get Kubernetes clientset: %w", err)
 		}

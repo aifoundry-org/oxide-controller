@@ -1,4 +1,4 @@
-package cmd
+package main
 
 import (
 	"context"
@@ -50,7 +50,7 @@ func rootCmd() (*cobra.Command, error) {
 		workerExternalIP            bool
 		controlPlaneExternalIP      bool
 		controlLoopMins             int
-		runOnce                     bool
+		noPivot                     bool
 		controlPlaneImageBlocksize  int
 		workerImageBlocksize        int
 		imageParallelism            int
@@ -62,6 +62,7 @@ func rootCmd() (*cobra.Command, error) {
 		tailscaleAPIKey             string
 		tailscaleTag                string
 		tailscaleTailnet            string
+		controllerOCIImage          string
 
 		logger = log.New()
 	)
@@ -165,6 +166,7 @@ func rootCmd() (*cobra.Command, error) {
 				kubeconfigOverwrite,
 				tailscaleAPIKey,
 				tailscaleTailnet,
+				controllerOCIImage,
 			)
 			// we perform 2 execution loops of the cluster execute function:
 			// - the first one is to create the cluster and get the kubeconfig
@@ -180,11 +182,27 @@ func rootCmd() (*cobra.Command, error) {
 				}
 			}
 
-			if runOnce {
-				logentry.Infof("Run once mode enabled, exiting after first run")
+			// Several possibilities:
+			// 1- we are running in the cluster, in which case we should just keep running
+			// 2- we are running locally, in which case we should load the helm charts onto the cluster and exit
+			// 3- we are running locally, and we have nopivot, in which case we should just keep running
+			//
+			// load the helm charts onto the cluster and pivot the controller to the cluster,
+			// then shut down this server.
+			//
+			// Unless nopivot is true, in which case we do not pivot
+			// and just keep running locally.
+			if !noPivot {
+				logentry.Infof("Loading helm charts and pivoting to run on the cluster")
+				if err := c.LoadHelmCharts(ctx); err != nil {
+					return fmt.Errorf("failed to load helm charts onto the cluster: %v", err)
+				}
 				return nil
 			}
 
+			logentry.Infof("Not pivoting to run on the cluster, continuing to run locally")
+
+			// we had noPivot, so keep running
 			// start each control loop
 			var (
 				wg    sync.WaitGroup
@@ -260,7 +278,8 @@ func rootCmd() (*cobra.Command, error) {
 	cmd.Flags().BoolVar(&controlPlaneExternalIP, "control-plane-external-ip", true, "Whether or not to assign an ephemeral public IP to the control plane nodes, needed to access cluster from outside sled, as well as for debugging")
 	cmd.Flags().IntVarP(&verbose, "verbose", "v", 0, "set log level, 0 is info, 1 is debug, 2 is trace")
 	cmd.Flags().StringVar(&address, "address", ":8080", "Address to bind the server to")
-	cmd.Flags().BoolVar(&runOnce, "runonce", false, "Run the server once and then exit, do not run a long-running control loop for checking the controller or listening for API calls")
+	cmd.Flags().BoolVar(&noPivot, "no-pivot", false, "Do not pivot this controller to run on the cluster itself after bringing the cluster up, instead continue long-running here")
+	cmd.Flags().StringVar(&controllerOCIImage, "controller-oci-image", "aifoundryorg/oxide-controller:latest", "OCI image to use for the controller")
 	cmd.Flags().IntVar(&controlLoopMins, "control-loop-mins", 5, "How often to run the control loop, in minutes")
 	cmd.Flags().IntVar(&imageParallelism, "image-parallelism", 1, "How many parallel threads to use for uploading images to the sled")
 	cmd.Flags().StringVar(&tailscaleAuthKey, "tailscale-auth-key", "", "Tailscale auth key to use for authentication, if none provided, will not join a tailnet; if starts with 'file:' then will read the key from the file")

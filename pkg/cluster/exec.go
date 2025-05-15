@@ -62,5 +62,6 @@ func (c *Cluster) Execute(ctx context.Context) (newKubeconfig []byte, err error)
 	if _, err := c.EnsureWorkerNodes(ctx); err != nil {
 		return nil, fmt.Errorf("failed to create worker nodes: %v", err)
 	}
+
 	return newKubeconfig, nil
 }

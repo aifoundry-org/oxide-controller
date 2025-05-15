@@ -1,0 +1,4 @@
+apiVersion: v2
+name: oxide-controller
+version: 0.1.0
+description: Deploys the oxide controller
