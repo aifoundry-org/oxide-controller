@@ -1,0 +1,53 @@
+name: continuous_integration
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: 'go.mod'
+      - name: Run tests
+        run: |
+          make test
+  build:
+    strategy:
+        matrix:
+          arch: [amd64, arm64, riscv64]
+          os: [linux, darwin]
+          include: 
+            - arch: amd64
+              os: linux
+            - arch: arm64
+              os: linux
+            - arch: riscv64
+              os: linux
+            - arch: amd64
+              os: darwin
+            - arch: arm64
+              os: darwin
+
+      runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: 'go.mod'
+      - name: Build
+        run: |
+            make build
