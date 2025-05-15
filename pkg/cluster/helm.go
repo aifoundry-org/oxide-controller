@@ -9,6 +9,7 @@ import (
 
 	ctrlr "github.com/aifoundry-org/oxide-controller"
 
+	"github.com/distribution/distribution/v3/reference"
 	"helm.sh/helm/v3/pkg/action"
 	"helm.sh/helm/v3/pkg/chart"
 	"helm.sh/helm/v3/pkg/chart/loader"
@@ -19,13 +20,48 @@ import (
 	"k8s.io/client-go/tools/clientcmd"
 )
 
-func (c *Cluster) loadHelmCharts(ctx context.Context) error {
-	rel, err := installOrUpgradeEmbeddedChart(ctrlr.ChartFiles, c.namespace, c.apiConfig, map[string]interface{}{})
+// LoadHelmCharts loads the embedded Helm charts into the cluster.
+func (c *Cluster) LoadHelmCharts(ctx context.Context) error {
+	repo, tag, err := parseImage(c.ociImage)
+	if err != nil {
+		return fmt.Errorf("failed to parse OCI image: %w", err)
+	}
+	values := map[string]interface{}{
+		"namespace":  c.namespace,
+		"secretName": c.secretName,
+		"image": map[string]interface{}{
+			"repository": repo,
+			"tag":        tag,
+			"port":       8080,
+		},
+	}
+	rel, err := installOrUpgradeEmbeddedChart(ctrlr.ChartFiles, c.namespace, c.apiConfig, values)
 	if err != nil {
 		return fmt.Errorf("failed to install/upgrade helm chart: %w", err)
 	}
 	c.logger.Infof("Release %s deployed to namespace %s", rel.Name, rel.Namespace)
 	return nil
+}
+
+func parseImage(image string) (repo string, tag string, err error) {
+	ref, err := reference.ParseNormalizedNamed(image)
+	if err != nil {
+		return "", "", fmt.Errorf("invalid image reference: %w", err)
+	}
+
+	// Always remove the default `latest` tag from canonical name if not explicitly set
+	named := reference.TagNameOnly(ref)
+
+	repo = named.Name()
+
+	// Try to extract tag if available
+	if tagged, ok := ref.(reference.Tagged); ok {
+		tag = tagged.Tag()
+	} else {
+		tag = "latest"
+	}
+
+	return repo, tag, nil
 }
 
 // loadActionConfigWithRestConfig returns an initialized Helm action.Configuration using a pre-built *rest.Config

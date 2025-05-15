@@ -63,10 +63,5 @@ func (c *Cluster) Execute(ctx context.Context) (newKubeconfig []byte, err error)
 		return nil, fmt.Errorf("failed to create worker nodes: %v", err)
 	}
 
-	// load our helm charts
-	if err := c.loadHelmCharts(ctx); err != nil {
-		return nil, fmt.Errorf("failed to load helm charts: %v", err)
-	}
-
 	return newKubeconfig, nil
 }

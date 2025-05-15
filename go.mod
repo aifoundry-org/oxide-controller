@@ -3,6 +3,7 @@ module github.com/aifoundry-org/oxide-controller
 go 1.23.1
 
 require (
+	github.com/distribution/distribution/v3 v3.0.0-20221208165359-362910506bc2
 	github.com/google/uuid v1.6.0
 	github.com/gorilla/mux v1.8.1
 	github.com/oxidecomputer/oxide.go v0.3.1-0.20250328231836-c8be65844352
