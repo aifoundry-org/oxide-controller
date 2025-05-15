@@ -44,6 +44,7 @@ func rootCmd() (*cobra.Command, error) {
 		kubeconfigPath              string
 		kubeconfigOverwrite         bool
 		controlPlaneSecret          string
+		controlPlaneNamespace       string
 		verbose                     int
 		address                     string
 		workerExternalIP            bool
@@ -159,7 +160,7 @@ func rootCmd() (*cobra.Command, error) {
 				cluster.NodeSpec{Image: cluster.Image{Name: controlPlaneImageName, Source: controlPlaneImageSource, Blocksize: controlPlaneImageBlocksize}, MemoryGB: int(controlPlaneMemory), CPUCount: int(controlPlaneCPU), ExternalIP: controlPlaneExternalIP, RootDiskSize: int(controlPlaneRootDiskSizeGB * cluster.GB), ExtraDiskSize: int(controlPlaneExtraDiskSizeGB * cluster.GB), TailscaleAuthKey: tailscaleAuthKey, TailscaleTag: tailscaleTag},
 				cluster.NodeSpec{Image: cluster.Image{Name: workerImageName, Source: workerImageSource, Blocksize: workerImageBlocksize}, MemoryGB: int(workerMemory), CPUCount: int(workerCPU), ExternalIP: workerExternalIP, RootDiskSize: int(workerRootDiskSizeGB * cluster.GB), ExtraDiskSize: int(workerExtraDiskSizeGB * cluster.GB), TailscaleAuthKey: tailscaleAuthKey, TailscaleTag: tailscaleTag},
 				imageParallelism,
-				controlPlaneSecret, kubeconfig, pubkey,
+				controlPlaneNamespace, controlPlaneSecret, kubeconfig, pubkey,
 				time.Duration(clusterInitWait)*time.Minute,
 				kubeconfigOverwrite,
 				tailscaleAPIKey,
@@ -253,7 +254,8 @@ func rootCmd() (*cobra.Command, error) {
 	cmd.Flags().StringVar(&userSSHPublicKey, "user-ssh-public-key", "", "Path to public key to inject in all deployed cloud instances")
 	cmd.Flags().StringVar(&kubeconfigPath, "kubeconfig", "~/.kube/oxide-controller-config", "Path to save kubeconfig when generating new cluster, or to use for accessing existing cluster")
 	cmd.Flags().BoolVar(&kubeconfigOverwrite, "kubeconfig-overwrite", false, "Whether or not to override the kubeconfig file if it already exists and a new cluster is created")
-	cmd.Flags().StringVar(&controlPlaneSecret, "control-plane-secret", "kube-system/oxide-controller-secret", "secret in Kubernetes cluster where the following are stored: join token, user ssh public key, controller ssh private/public keypair; should be as <namespace>/<name>")
+	cmd.Flags().StringVar(&controlPlaneSecret, "control-plane-secret", "oxide-controller-secret", "secret in Kubernetes cluster where the following are stored: join token, user ssh public key, controller ssh private/public keypair; will be in namespace provided by --namespace")
+	cmd.Flags().StringVar(&controlPlaneNamespace, "control-plane-namespace", "oxide-controller-system", "namespace in Kubernetes cluster where the resources live")
 	cmd.Flags().BoolVar(&workerExternalIP, "worker-external-ip", false, "Whether or not to assign an ephemeral public IP to the worker nodes, useful for debugging")
 	cmd.Flags().BoolVar(&controlPlaneExternalIP, "control-plane-external-ip", true, "Whether or not to assign an ephemeral public IP to the control plane nodes, needed to access cluster from outside sled, as well as for debugging")
 	cmd.Flags().IntVarP(&verbose, "verbose", "v", 0, "set log level, 0 is info, 1 is debug, 2 is trace")

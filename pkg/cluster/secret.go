@@ -73,7 +73,7 @@ func (c *Cluster) SetWorkerCount(ctx context.Context, count int) error {
 		return fmt.Errorf("failed to get secret: %w", err)
 	}
 	secretMap[secretKeyWorkerCount] = []byte(fmt.Sprintf("%d", count))
-	if err := saveSecret(ctx, c.logger, c.secretName, c.kubeconfig, secretMap); err != nil {
+	if err := saveSecret(ctx, c.logger, c.namespace, c.secretName, c.kubeconfig, secretMap); err != nil {
 		return fmt.Errorf("failed to save secret: %w", err)
 	}
 	return nil
@@ -103,14 +103,8 @@ func getSecret(ctx context.Context, logger *log.Entry, kubeconfigRaw []byte, sec
 }
 
 // saveSecret save a secret to the Kubernetes cluster
-func saveSecret(ctx context.Context, logger *log.Entry, secretRef string, kubeconfig []byte, data map[string][]byte) error {
-	logger.Debugf("Saving secret %s with kubeconfig size %d and keymap size %d", secretRef, len(kubeconfig), len(data))
-	// Parse namespace and name from <namespace>/<name>
-	parts := strings.SplitN(secretRef, "/", 2)
-	if len(parts) != 2 {
-		return fmt.Errorf("invalid secret reference: expected <namespace>/<name>")
-	}
-	namespace, name := parts[0], parts[1]
+func saveSecret(ctx context.Context, logger *log.Entry, namespace, name string, kubeconfig []byte, data map[string][]byte) error {
+	logger.Debugf("Saving secret %s with kubeconfig size %d and keymap size %d", name, len(kubeconfig), len(data))
 
 	clientset, err := getClientset(kubeconfig)
 	if err != nil {

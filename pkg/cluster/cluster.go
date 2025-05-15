@@ -29,6 +29,7 @@ type Cluster struct {
 	workerCount                  int
 	controlPlaneSpec, workerSpec NodeSpec
 	secretName                   string
+	namespace                    string
 	kubeconfig, userPubkey       []byte
 	controlPlaneIP               string
 	imageParallelism             int
@@ -37,7 +38,7 @@ type Cluster struct {
 }
 
 // New creates a new Cluster instance
-func New(logger *log.Entry, client *oxide.Client, projectID string, controlPlanePrefix, workerPrefix string, controlPlaneCount, workerCount int, controlPlaneSpec, workerSpec NodeSpec, imageParallelism int, secretName string, kubeconfig, pubkey []byte, clusterInitWait time.Duration, kubeconfigOverwrite bool, tailscaleAPIKey, tailscaleTailnet string) *Cluster {
+func New(logger *log.Entry, client *oxide.Client, projectID string, controlPlanePrefix, workerPrefix string, controlPlaneCount, workerCount int, controlPlaneSpec, workerSpec NodeSpec, imageParallelism int, namespace, secretName string, kubeconfig, pubkey []byte, clusterInitWait time.Duration, kubeconfigOverwrite bool, tailscaleAPIKey, tailscaleTailnet string) *Cluster {
 	c := &Cluster{
 		logger:              logger.WithField("component", "cluster"),
 		client:              client,
@@ -47,6 +48,7 @@ func New(logger *log.Entry, client *oxide.Client, projectID string, controlPlane
 		controlPlaneSpec:    controlPlaneSpec,
 		workerSpec:          workerSpec,
 		secretName:          secretName,
+		namespace:           namespace,
 		kubeconfig:          kubeconfig,
 		userPubkey:          pubkey,
 		clusterInitWait:     clusterInitWait,
@@ -307,9 +309,15 @@ func (c *Cluster) ensureClusterExists(ctx context.Context) (newKubeconfig []byte
 			secrets[secretKeyWorkerCount] = []byte(fmt.Sprintf("%d", c.workerCount))
 		}
 
+		// ensure we have the namespace we need
+		namespace := c.namespace
+		if err := createNamespace(ctx, namespace, c.kubeconfig); err != nil {
+			return nil, fmt.Errorf("failed to create namespace: %w", err)
+		}
+
 		// save the join token, system ssh key pair, user ssh key to the Kubernetes secret
-		c.logger.Debugf("Saving secret %s to Kubernetes", secretName)
-		if err := saveSecret(ctx, c.logger, secretName, c.kubeconfig, secrets); err != nil {
+		c.logger.Debugf("Saving secret %s/%s to Kubernetes", namespace, secretName)
+		if err := saveSecret(ctx, c.logger, namespace, secretName, c.kubeconfig, secrets); err != nil {
 			return nil, fmt.Errorf("failed to save secret: %w", err)
 		}
 
