@@ -219,7 +219,7 @@ func (c *Cluster) ensureClusterExists(ctx context.Context) (newKubeconfig []byte
 		timeLeft := c.clusterInitWait
 		for {
 			c.logger.Infof("Waiting %s for control plane node to be up and running...", timeLeft)
-			sleepTime := 1 * time.Minute
+			sleepTime := 30 * time.Second
 			time.Sleep(sleepTime)
 			timeLeft -= sleepTime
 
@@ -316,7 +316,7 @@ func (c *Cluster) ensureClusterExists(ctx context.Context) (newKubeconfig []byte
 		}
 
 		// get a Kubernetes client
-		apiConfig, err := getRestConfig(kubeconfig)
+		apiConfig, err := getRestConfig(c.kubeconfig)
 		if err != nil {
 			return nil, fmt.Errorf("failed to get rest config: %w", err)
 		}

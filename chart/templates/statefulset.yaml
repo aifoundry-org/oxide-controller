@@ -34,9 +34,21 @@ spec:
       containers:
         - name: controller
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
-          args: --no-pivot=true
+          command: ["/controller"]
+          args: 
+          - --no-pivot=true
           ports:
             - containerPort: {{ .Values.image.port }}
           env:
             - name: SECRET_NAME
               value: "{{ .Values.secretName }}"
+      {{- if .Values.useHostBinary }}
+          volumeMounts:
+            - name: bin
+              mountPath: /controller
+      volumes:
+        - name: bin
+          hostPath:
+            path: /opt/bin/controller
+            type: File
+      {{- end }}

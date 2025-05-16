@@ -19,7 +19,8 @@ import (
 )
 
 const (
-	defaultBlocksize = 512
+	defaultBlocksize  = 512
+	ociImageDevPrefix = "dev:"
 )
 
 func rootCmd() (*cobra.Command, error) {
@@ -154,6 +155,10 @@ func rootCmd() (*cobra.Command, error) {
 				}
 			}
 
+			// At this point that we should set cmd.ShowUsage = false, as we no longer need to show the usage.
+			// All future errors are by the system, not erroneous user input.
+			// We will do it in a separate commit.
+
 			ctx := context.Background()
 
 			c := cluster.New(logentry, oxideClient, clusterProject,
@@ -192,7 +197,48 @@ func rootCmd() (*cobra.Command, error) {
 			//
 			// Unless nopivot is true, in which case we do not pivot
 			// and just keep running locally.
+			// if we are running in dev mode, and we will want to pivot, we will need to build a suitable copy
+			// of the controller binary to load into the cluster.
+
 			if !noPivot {
+				// if we are in dev mode, should load onto control planes nodes in the cluster
+				if strings.HasPrefix(controllerOCIImage, ociImageDevPrefix) {
+					logentry.Infof("Building dev binary for controller")
+					parts := strings.Split(controllerOCIImage, ":")
+					if len(parts) < 2 || parts[1] == "" {
+						return fmt.Errorf("invalid dev image name: %s", controllerOCIImage)
+					}
+					buildPath := parts[1]
+					// was a particular platform requested?
+					platform := fmt.Sprintf("%s/%s", os.Getenv("GOOS"), os.Getenv("GOARCH"))
+					if len(parts) >= 3 && parts[2] != "" {
+						platform = parts[2]
+					}
+
+					tmpBinaryFile, err := os.CreateTemp("", "built-binary-*")
+					if err != nil {
+						return fmt.Errorf("creating tempfile: %w", err)
+					}
+					tmpBinaryFile.Close() // We just want the name
+					tmpExecutable := tmpBinaryFile.Name()
+					os.Chmod(tmpBinaryFile.Name(), 0755) // Make sure it's executable
+					if err := buildGoBinary(buildPath, tmpExecutable, platform); err != nil {
+						return fmt.Errorf("failed to build go binary: %v", err)
+					}
+
+					// load the binary into the cluster
+					infile, err := os.Open(tmpExecutable)
+					if err != nil {
+						return fmt.Errorf("opening binary file: %w", err)
+					}
+					defer infile.Close()
+					if err := c.LoadControllerToClusterNodes(ctx, infile); err != nil {
+						return fmt.Errorf("failed to load controller binary into cluster: %v", err)
+					}
+
+					// the helm charts are already in the image, they will be modified appropriately to run
+					// our runner image
+				}
 				logentry.Infof("Loading helm charts and pivoting to run on the cluster")
 				if err := c.LoadHelmCharts(ctx); err != nil {
 					return fmt.Errorf("failed to load helm charts onto the cluster: %v", err)
@@ -279,7 +325,7 @@ func rootCmd() (*cobra.Command, error) {
 	cmd.Flags().IntVarP(&verbose, "verbose", "v", 0, "set log level, 0 is info, 1 is debug, 2 is trace")
 	cmd.Flags().StringVar(&address, "address", ":8080", "Address to bind the server to")
 	cmd.Flags().BoolVar(&noPivot, "no-pivot", false, "Do not pivot this controller to run on the cluster itself after bringing the cluster up, instead continue long-running here")
-	cmd.Flags().StringVar(&controllerOCIImage, "controller-oci-image", "aifoundryorg/oxide-controller:latest", "OCI image to use for the controller")
+	cmd.Flags().StringVar(&controllerOCIImage, "controller-oci-image", "aifoundryorg/oxide-controller:latest", "OCI image to use for the controller; if 'dev', will use the local build of the controller")
 	cmd.Flags().IntVar(&controlLoopMins, "control-loop-mins", 5, "How often to run the control loop, in minutes")
 	cmd.Flags().IntVar(&imageParallelism, "image-parallelism", 1, "How many parallel threads to use for uploading images to the sled")
 	cmd.Flags().StringVar(&tailscaleAuthKey, "tailscale-auth-key", "", "Tailscale auth key to use for authentication, if none provided, will not join a tailnet; if starts with 'file:' then will read the key from the file")

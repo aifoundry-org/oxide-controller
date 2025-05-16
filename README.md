@@ -9,14 +9,29 @@ This can run standalone on your own device, in a VM, or inside the Kubernetes cl
 
 All options are configured via CLI flags. Run `oxide-controller --help` to see the available options.
 
-The production-recommended way to run this is:
+The production-recommended, and default, that this runs is:
 
-1. Run this locally, pointing to the Oxide sled, which will cause a 3-node kubernetes cluster to be deployed.
-1. Stop running this locally, deploy it as a `StatefulSet` of 1 replica in the Kubernetes cluster.
-1. Profit!
+1. Start locally, pointing to the Oxide sled, which will cause a 3-node kubernetes cluster to be deployed.
+1. Deploy a helm chart to the cluster, which will deploy the oxide-controller into the cluster.
+1. Exit locally
+1. The oxide-controller running in the cluster ensures that the cluster remains up and running, that the workers nodes are in the desired state, and listens for API calls to change the worker node count.
 
-In the future, the oxide-controller will pivot automatically to deploying itself on the cluster
-and shutting down the local instance.
+Note that the above assumes an available OCI image containing the controller. The default image is available
+in the chart. You can override it.
+
+## Rapid Development Mode
+
+For rapid development purposes, you may want to make changes to the controller, and run it with `go run` or `dlv debug`,
+or even compile it and run it locally. In all of those cases, you are not yet publishing an OCI image to a registry.
+You can launch your own program if you set `--controller-oci-image dev:<path-to-src>`, it will compile a binary from the
+provided path. 
+
+By default, the binary is built for the same platform (OS and architecture) as the host system. If you want to build for
+a different platform, you can set the `--controller-oci-image` flag to `dev:<path-to-src>:<platform>`, where
+`<platform>` is the target platform in the format `<os>/<arch>`. For example, `dev:./cmd/oxide-controller:linux/amd64`
+would build for Linux on AMD64 architecture.
+
+This is useful for testing changes to the controller itself, but should **not** be used in production.
 
 ## REST API
 

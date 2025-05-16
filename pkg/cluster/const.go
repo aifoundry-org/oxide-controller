@@ -13,4 +13,6 @@ const (
 	secretKeySystemSSHPrivate = "system-ssh-private-key"
 	secretKeyWorkerCount      = "worker-count"
 	maximumChunkSize          = 512 * KB
+
+	devModeOCIImage = "dev"
 )
