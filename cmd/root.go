@@ -155,9 +155,9 @@ func rootCmd() (*cobra.Command, error) {
 				}
 			}
 
-			// At this point that we should set cmd.ShowUsage = false, as we no longer need to show the usage.
+			// At this point that we set cmd.SilenceUsage = true, as we no longer need to show the usage.
 			// All future errors are by the system, not erroneous user input.
-			// We will do it in a separate commit.
+			cmd.SilenceUsage = true
 
 			ctx := context.Background()
 
