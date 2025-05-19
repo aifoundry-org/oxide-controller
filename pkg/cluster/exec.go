@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/aifoundry-org/oxide-controller/pkg/util"
+	"github.com/oxidecomputer/oxide.go/oxide"
 )
 
 // Execute execute the core functionality, which includes:
@@ -14,8 +15,12 @@ import (
 // 4. Ensuring the worker nodes exist as desired
 // 5. Returning the new kubeconfig, if any
 func (c *Cluster) Execute(ctx context.Context) (newKubeconfig []byte, err error) {
+	client, err := oxide.NewClient(c.oxideConfig)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create Oxide API client: %v", err)
+	}
 
-	projectID, err := ensureProjectExists(ctx, c.logger, c.client, c.projectID)
+	projectID, err := ensureProjectExists(ctx, c.logger, client, c.projectID)
 	if err != nil {
 		return nil, fmt.Errorf("project verification failed: %v", err)
 	}
@@ -24,7 +29,7 @@ func (c *Cluster) Execute(ctx context.Context) (newKubeconfig []byte, err error)
 		c.logger.Infof("Using project ID: %s", c.projectID)
 	}
 
-	images, err := ensureImagesExist(ctx, c.logger, c.client, c.projectID, c.imageParallelism, c.controlPlaneSpec.Image, c.workerSpec.Image)
+	images, err := ensureImagesExist(ctx, c.logger, client, c.projectID, c.imageParallelism, c.controlPlaneSpec.Image, c.workerSpec.Image)
 	if err != nil {
 		return nil, fmt.Errorf("image verification failed: %v", err)
 	}
