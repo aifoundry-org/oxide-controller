@@ -12,6 +12,8 @@ const (
 	secretKeySystemSSHPublic  = "system-ssh-public-key"
 	secretKeySystemSSHPrivate = "system-ssh-private-key"
 	secretKeyWorkerCount      = "worker-count"
+	secretKeyOxideToken       = "oxide-token"
+	secretKeyOxideURL         = "oxide-url"
 	maximumChunkSize          = 512 * KB
 
 	devModeOCIImage = "dev"

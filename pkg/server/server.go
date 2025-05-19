@@ -9,14 +9,12 @@ import (
 	"github.com/aifoundry-org/oxide-controller/pkg/cluster"
 	"github.com/gorilla/mux"
 
-	"github.com/oxidecomputer/oxide.go/oxide"
 	log "github.com/sirupsen/logrus"
 )
 
 type Server struct {
 	logger         *log.Entry
 	address        string
-	oxideClient    *oxide.Client
 	cluster        *cluster.Cluster
 	secretName     string
 	projectID      string
@@ -26,11 +24,10 @@ type Server struct {
 	workerCPUCount int
 }
 
-func New(address string, logger *log.Entry, oxideClient *oxide.Client, cluster *cluster.Cluster, secretName, projectID, prefix, workerImage string, workerMemoryGB, workerCPUCount int) *Server {
+func New(address string, logger *log.Entry, cluster *cluster.Cluster, secretName, projectID, prefix, workerImage string, workerMemoryGB, workerCPUCount int) *Server {
 	return &Server{
 		logger:         logger.WithField("component", "server"),
 		address:        address,
-		oxideClient:    oxideClient,
 		cluster:        cluster,
 		secretName:     secretName,
 		projectID:      projectID,

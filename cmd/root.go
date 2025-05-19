@@ -9,7 +9,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/oxidecomputer/oxide.go/oxide"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 
@@ -26,7 +25,7 @@ const (
 func rootCmd() (*cobra.Command, error) {
 	var (
 		oxideAPIURL                 string
-		tokenFilePath               string
+		oxideToken                  string
 		clusterProject              string
 		controlPlanePrefix          string
 		workerPrefix                string
@@ -106,21 +105,15 @@ func rootCmd() (*cobra.Command, error) {
 				return fmt.Errorf("failed to load kubeconfig at %s: %w", kubeconfigPath, err)
 			}
 
-			logentry.Debugf("Loading Oxide token from %s", tokenFilePath)
-			b, err := util.LoadFile(tokenFilePath)
-			oxideToken := strings.TrimSuffix(string(b), "\n")
-			if err != nil {
-				return fmt.Errorf("failed to load oxide token at %s: %w", tokenFilePath, err)
-			}
-
-			cfg := oxide.Config{
-				Host:  oxideAPIURL,
-				Token: string(oxideToken),
-			}
-			logentry.Debugf("Creating Oxide API client with config: %+v", cfg)
-			oxideClient, err := oxide.NewClient(&cfg)
-			if err != nil {
-				return fmt.Errorf("failed to create Oxide API client: %v", err)
+			if strings.HasPrefix(oxideToken, "file:") {
+				tokenFilePath := strings.TrimPrefix(oxideToken, "file:")
+				oxideToken = ""
+				logentry.Debugf("Loading oxide token from %s", tokenFilePath)
+				b, err := os.ReadFile(tokenFilePath)
+				if err != nil {
+					return fmt.Errorf("failed to load oxide token at %s: %w", tokenFilePath, err)
+				}
+				oxideToken = strings.TrimSuffix(string(b), "\n")
 			}
 
 			// if tailscaleAuthKey starts with file: then it is a path
@@ -161,7 +154,7 @@ func rootCmd() (*cobra.Command, error) {
 
 			ctx := context.Background()
 
-			c := cluster.New(logentry, oxideClient, clusterProject,
+			c := cluster.New(logentry, oxideAPIURL, oxideToken, clusterProject,
 				controlPlanePrefix, workerPrefix, int(controlPlaneCount), int(workerCount),
 				cluster.NodeSpec{Image: cluster.Image{Name: controlPlaneImageName, Source: controlPlaneImageSource, Blocksize: controlPlaneImageBlocksize}, MemoryGB: int(controlPlaneMemory), CPUCount: int(controlPlaneCPU), ExternalIP: controlPlaneExternalIP, RootDiskSize: int(controlPlaneRootDiskSizeGB * cluster.GB), ExtraDiskSize: int(controlPlaneExtraDiskSizeGB * cluster.GB), TailscaleAuthKey: tailscaleAuthKey, TailscaleTag: tailscaleTag},
 				cluster.NodeSpec{Image: cluster.Image{Name: workerImageName, Source: workerImageSource, Blocksize: workerImageBlocksize}, MemoryGB: int(workerMemory), CPUCount: int(workerCPU), ExternalIP: workerExternalIP, RootDiskSize: int(workerRootDiskSizeGB * cluster.GB), ExtraDiskSize: int(workerExtraDiskSizeGB * cluster.GB), TailscaleAuthKey: tailscaleAuthKey, TailscaleTag: tailscaleTag},
@@ -277,7 +270,7 @@ func rootCmd() (*cobra.Command, error) {
 				// serve REST endpoints
 				defer wg.Done()
 				logentry.Infof("Starting server on address %s", address)
-				s := server.New(address, logentry, oxideClient, c, controlPlaneSecret, clusterProject, controlPlanePrefix, workerImageName, int(workerMemory), int(workerCPU))
+				s := server.New(address, logentry, c, controlPlaneSecret, clusterProject, controlPlanePrefix, workerImageName, int(workerMemory), int(workerCPU))
 				errCh <- s.Serve()
 			}()
 
@@ -293,8 +286,8 @@ func rootCmd() (*cobra.Command, error) {
 	}
 
 	// Define CLI flags
-	cmd.Flags().StringVar(&oxideAPIURL, "oxide-api-url", "https://oxide-api.example.com", "Oxide API base URL")
-	cmd.Flags().StringVar(&tokenFilePath, "token-file", "/data/oxide_token", "Path to Oxide API token file")
+	cmd.Flags().StringVar(&oxideAPIURL, "oxide-api-url", "", "Oxide API base URL; if not provided, will read from Kubernetes secret if available, or from ~/.config/oxide, or faill back to the default URL")
+	cmd.Flags().StringVar(&oxideToken, "oxide-token", "", "Oxide API token; if starts with 'file:' then will read the key from the file; if none provided, will read from Kubernetes secret if available, or from ~/.config/oxide")
 	cmd.Flags().StringVar(&clusterProject, "cluster-project", "ainekko-cluster", "Oxide project name for Kubernetes cluster")
 	cmd.Flags().StringVar(&controlPlanePrefix, "control-plane-prefix", "ainekko-control-plane-", "Prefix for control plane instances")
 	cmd.Flags().StringVar(&workerPrefix, "worker-prefix", "ainekko-worker-", "Prefix for worker instances")

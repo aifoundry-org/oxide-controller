@@ -34,16 +34,20 @@ func GetControlPlaneIP(ctx context.Context, logger *log.Entry, client *oxide.Cli
 }
 
 func (c *Cluster) ensureControlPlaneIP(ctx context.Context, controlPlanePrefix string) (*oxide.FloatingIp, error) {
+	client, err := oxide.NewClient(c.oxideConfig)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create Oxide API client: %v", err)
+	}
 	var controlPlaneIP *oxide.FloatingIp
 	c.logger.Debugf("getting control plane IP for prefix %s", controlPlanePrefix)
-	controlPlaneIP, err := GetControlPlaneIP(ctx, c.logger, c.client, c.projectID, controlPlanePrefix)
+	controlPlaneIP, err = GetControlPlaneIP(ctx, c.logger, client, c.projectID, controlPlanePrefix)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get control plane IP: %w", err)
 	}
 	// what if we did not find one?
 	if controlPlaneIP == nil {
 		c.logger.Infof("Control plane floating IP not found. Creating one...")
-		fip, err := c.client.FloatingIpCreate(ctx, oxide.FloatingIpCreateParams{
+		fip, err := client.FloatingIpCreate(ctx, oxide.FloatingIpCreateParams{
 			Project: oxide.NameOrId(c.projectID),
 			Body: &oxide.FloatingIpCreate{
 				Name:        oxide.Name(fmt.Sprintf("%s-floating-ip", controlPlanePrefix)),

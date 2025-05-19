@@ -192,12 +192,15 @@ func GenerateCloudConfig(nodeType string, initCluster bool, controlPlaneIP, join
 
 // createControlPlaneNodes creates new control plane nodes
 func (c *Cluster) CreateControlPlaneNodes(ctx context.Context, initCluster bool, count, start int, additionalPubKeys []string) ([]oxide.Instance, error) {
+	client, err := oxide.NewClient(c.oxideConfig)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create Oxide API client: %v", err)
+	}
 	var controlPlaneNodes []oxide.Instance
 	c.logger.Debugf("Creating %d control plane nodes with prefix %s", count, c.controlPlanePrefix)
 
 	var joinToken string
 	var pubkey []byte
-	var err error
 
 	if !initCluster {
 		joinToken, err = c.GetJoinToken(ctx)
@@ -228,7 +231,7 @@ func (c *Cluster) CreateControlPlaneNodes(ctx context.Context, initCluster bool,
 	}
 
 	for i := start; i < start+count; i++ {
-		instance, err := CreateInstance(ctx, c.client, c.projectID, fmt.Sprintf("%s%d", c.controlPlanePrefix, i), c.controlPlaneSpec, cloudConfig)
+		instance, err := CreateInstance(ctx, client, c.projectID, fmt.Sprintf("%s%d", c.controlPlanePrefix, i), c.controlPlaneSpec, cloudConfig)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create control plane node: %w", err)
 		}
@@ -240,6 +243,10 @@ func (c *Cluster) CreateControlPlaneNodes(ctx context.Context, initCluster bool,
 
 // EnsureWorkerNodes ensures the count of worker nodes matches what it should be
 func (c *Cluster) EnsureWorkerNodes(ctx context.Context) ([]oxide.Instance, error) {
+	client, err := oxide.NewClient(c.oxideConfig)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create Oxide API client: %v", err)
+	}
 	// try to get the worker count from the cluster
 	// if it fails, we will use the default value
 	// if it succeeds, we will use that value
@@ -258,7 +265,7 @@ func (c *Cluster) EnsureWorkerNodes(ctx context.Context) ([]oxide.Instance, erro
 	c.logger.Debugf("Ensuring %d worker nodes", count)
 	var nodes []oxide.Instance
 	// first check how many worker nodes we have, by asking the cluster
-	_, workers, err := getNodesOxide(ctx, c.logger, c.client, c.projectID, c.controlPlanePrefix, c.workerPrefix)
+	_, workers, err := getNodesOxide(ctx, c.logger, client, c.projectID, c.controlPlanePrefix, c.workerPrefix)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get nodes: %w", err)
 	}
@@ -293,7 +300,7 @@ func (c *Cluster) EnsureWorkerNodes(ctx context.Context) ([]oxide.Instance, erro
 
 	for i := actualCount; i < int(count); i++ {
 		workerName := fmt.Sprintf("%s%d", c.workerPrefix, time.Now().Unix())
-		instance, err := CreateInstance(ctx, c.client, c.projectID, workerName, c.workerSpec, cloudConfig)
+		instance, err := CreateInstance(ctx, client, c.projectID, workerName, c.workerSpec, cloudConfig)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create worker node: %w", err)
 		}

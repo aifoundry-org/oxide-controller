@@ -20,7 +20,7 @@ import (
 
 type Cluster struct {
 	logger              *log.Entry
-	client              *oxide.Client
+	oxideConfig         *oxide.Config
 	projectID           string
 	controlPlanePrefix  string
 	workerPrefix        string
@@ -43,10 +43,15 @@ type Cluster struct {
 }
 
 // New creates a new Cluster instance
-func New(logger *log.Entry, client *oxide.Client, projectID string, controlPlanePrefix, workerPrefix string, controlPlaneCount, workerCount int, controlPlaneSpec, workerSpec NodeSpec, imageParallelism int, namespace, secretName string, kubeconfig, pubkey []byte, clusterInitWait time.Duration, kubeconfigOverwrite bool, tailscaleAPIKey, tailscaleTailnet, OCIimage string) *Cluster {
+func New(logger *log.Entry, oxideURL, oxideToken, projectID string, controlPlanePrefix, workerPrefix string, controlPlaneCount, workerCount int, controlPlaneSpec, workerSpec NodeSpec, imageParallelism int, namespace, secretName string, kubeconfig, pubkey []byte, clusterInitWait time.Duration, kubeconfigOverwrite bool, tailscaleAPIKey, tailscaleTailnet, OCIimage string) *Cluster {
+	cfg := oxide.Config{
+		Host:  oxideURL,
+		Token: string(oxideToken),
+	}
+
 	c := &Cluster{
 		logger:              logger.WithField("component", "cluster"),
-		client:              client,
+		oxideConfig:         &cfg,
 		projectID:           projectID,
 		controlPlanePrefix:  controlPlanePrefix,
 		workerPrefix:        workerPrefix,
@@ -71,7 +76,10 @@ func New(logger *log.Entry, client *oxide.Client, projectID string, controlPlane
 // ensureClusterExists checks if a k3s cluster exists, and creates one if needed
 func (c *Cluster) ensureClusterExists(ctx context.Context) (newKubeconfig []byte, err error) {
 	// local vars just for convenience
-	client := c.client
+	client, err := oxide.NewClient(c.oxideConfig)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create Oxide API client: %v", err)
+	}
 	projectID := c.projectID
 	controlPlanePrefix := c.controlPlanePrefix
 	controlPlaneCount := c.controlPlaneCount
@@ -290,6 +298,8 @@ func (c *Cluster) ensureClusterExists(ctx context.Context) (newKubeconfig []byte
 		secrets[secretKeySystemSSHPublic] = pub
 		secrets[secretKeySystemSSHPrivate] = priv
 		secrets[secretKeyJoinToken] = joinToken
+		secrets[secretKeyOxideToken] = []byte(c.oxideConfig.Token)
+		secrets[secretKeyOxideURL] = []byte(c.oxideConfig.Host)
 
 		// save the user ssh public key to the secrets map
 		if c.userPubkey != nil {
