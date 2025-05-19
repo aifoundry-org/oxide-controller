@@ -2,10 +2,10 @@ package cluster
 
 import (
 	"context"
-	"embed"
 	"fmt"
 	"io/fs"
 	"strings"
+	"time"
 
 	ctrlr "github.com/aifoundry-org/oxide-controller"
 
@@ -14,28 +14,63 @@ import (
 	"helm.sh/helm/v3/pkg/chart"
 	"helm.sh/helm/v3/pkg/chart/loader"
 	"helm.sh/helm/v3/pkg/release"
+	"helm.sh/helm/v3/pkg/storage/driver"
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/client-go/discovery"
+	"k8s.io/client-go/discovery/cached/memory"
 	"k8s.io/client-go/rest"
+	"k8s.io/client-go/restmapper"
 	"k8s.io/client-go/tools/clientcmd"
+	"k8s.io/client-go/tools/clientcmd/api"
+)
+
+const (
+	chartName     = "oxide-controller"
+	drivers       = "secrets"
+	chartWaitTime = 300 * time.Minute
 )
 
 // LoadHelmCharts loads the embedded Helm charts into the cluster.
 func (c *Cluster) LoadHelmCharts(ctx context.Context) error {
-	repo, tag, err := parseImage(c.ociImage)
-	if err != nil {
-		return fmt.Errorf("failed to parse OCI image: %w", err)
+	var (
+		repo, tag     string
+		err           error
+		useHostBinary bool
+	)
+	// if flagged as dev mode, use the host binary, else determine it from the image
+	if c.ociImage == devModeOCIImage {
+		// Use the host binary for dev mode
+		useHostBinary = true
+		repo = "busybox"
+		tag = "latest"
+	} else {
+		repo, tag, err = parseImage(c.ociImage)
+		if err != nil {
+			return fmt.Errorf("failed to parse OCI image: %w", err)
+		}
+
+	}
+
+	if repo == "dev" {
 	}
 	values := map[string]interface{}{
-		"namespace":  c.namespace,
-		"secretName": c.secretName,
+		"createNamespace": false,
+		"namespace":       c.namespace,
+		"secretName":      c.secretName,
+		"useHostBinary":   useHostBinary,
 		"image": map[string]interface{}{
 			"repository": repo,
 			"tag":        tag,
 			"port":       8080,
 		},
 	}
-	rel, err := installOrUpgradeEmbeddedChart(ctrlr.ChartFiles, c.namespace, c.apiConfig, values)
+	chartFiles, err := ctrlr.Chart()
+	if err != nil {
+		return fmt.Errorf("failed to load chart files: %w", err)
+	}
+	fmt.Printf("values: %+v\n", values)
+	rel, err := installOrUpgradeEmbeddedChart(chartFiles, c.namespace, c.apiConfig, values)
+	fmt.Printf("manifest: %s\n", rel.Manifest)
 	if err != nil {
 		return fmt.Errorf("failed to install/upgrade helm chart: %w", err)
 	}
@@ -71,8 +106,7 @@ func loadActionConfigWithRestConfig(namespace string, restConfig *rest.Config) (
 		RestConfig: restConfig,
 		Namespace:  namespace,
 	}
-	driver := "secrets"
-	err := cfg.Init(restClientGetter, namespace, driver, func(format string, v ...interface{}) {
+	err := cfg.Init(restClientGetter, namespace, drivers, func(format string, v ...interface{}) {
 		fmt.Printf(format+"\n", v...)
 	})
 	if err != nil {
@@ -82,8 +116,12 @@ func loadActionConfigWithRestConfig(namespace string, restConfig *rest.Config) (
 	return cfg, nil
 }
 
-func installOrUpgradeEmbeddedChart(chartFS embed.FS, namespace string, restConfig *rest.Config, values map[string]interface{}) (*release.Release, error) {
-	actionConfig, err := loadActionConfigWithRestConfig(namespace, restConfig)
+func installOrUpgradeEmbeddedChart(chartFS fs.FS, namespace string, restConfig *rest.Config, values map[string]interface{}) (*release.Release, error) {
+	// we clone the config because we will change some settings, and do not want it to affect the original
+	rc := rest.CopyConfig(restConfig)
+	rc.QPS = 100
+	rc.Burst = 200
+	actionConfig, err := loadActionConfigWithRestConfig(namespace, rc)
 	if err != nil {
 		return nil, err
 	}
@@ -93,17 +131,29 @@ func installOrUpgradeEmbeddedChart(chartFS embed.FS, namespace string, restConfi
 		return nil, fmt.Errorf("failed to load embedded chart: %w", err)
 	}
 
-	client := action.NewUpgrade(actionConfig)
-	client.Namespace = namespace
-	client.Install = true
-	client.Atomic = true
+	histClient := action.NewHistory(actionConfig)
+	histClient.Max = 1
+	_, err = histClient.Run(chartName)
 
-	release, err := client.Run("oxide-controller", chart, values)
-	if err != nil {
-		return nil, fmt.Errorf("failed to install/upgrade chart: %w", err)
+	if err == driver.ErrReleaseNotFound {
+		// Install new release
+		install := action.NewInstall(actionConfig)
+		install.ReleaseName = chartName
+		install.Namespace = namespace
+		install.Atomic = true
+		install.Timeout = chartWaitTime
+
+		return install.Run(chart, values)
+	} else if err != nil {
+		return nil, fmt.Errorf("failed to check release history: %w", err)
 	}
 
-	return release, nil
+	upgrade := action.NewUpgrade(actionConfig)
+	upgrade.Namespace = namespace
+	upgrade.Atomic = true
+	upgrade.Timeout = chartWaitTime
+
+	return upgrade.Run(chartName, chart, values)
 }
 
 func loadChartFromFS(chartFS fs.FS) (*chart.Chart, error) {
@@ -142,15 +192,34 @@ func (s *StaticRESTClientGetter) ToRESTConfig() (*rest.Config, error) {
 }
 
 func (s *StaticRESTClientGetter) ToRawKubeConfigLoader() clientcmd.ClientConfig {
-	return nil
+	return clientcmd.NewNonInteractiveClientConfig(
+		*api.NewConfig(),
+		"",
+		&clientcmd.ConfigOverrides{
+			ClusterDefaults: clientcmd.ClusterDefaults,
+			CurrentContext:  "",
+			Context: api.Context{
+				Namespace: s.Namespace,
+			},
+		},
+		nil,
+	)
 }
 
 func (s *StaticRESTClientGetter) ToDiscoveryClient() (discovery.CachedDiscoveryInterface, error) {
-	return nil, fmt.Errorf("discovery client not implemented")
+	disc, err := discovery.NewDiscoveryClientForConfig(s.RestConfig)
+	if err != nil {
+		return nil, err
+	}
+	return memory.NewMemCacheClient(disc), nil
 }
 
 func (s *StaticRESTClientGetter) ToRESTMapper() (meta.RESTMapper, error) {
-	return nil, fmt.Errorf("RESTMapper not implemented")
+	discoveryClient, err := s.ToDiscoveryClient()
+	if err != nil {
+		return nil, err
+	}
+	return restmapper.NewDeferredDiscoveryRESTMapper(discoveryClient), nil
 }
 
 func (s *StaticRESTClientGetter) ToNamespace() (string, error) {
