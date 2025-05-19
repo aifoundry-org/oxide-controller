@@ -43,15 +43,10 @@ type Cluster struct {
 }
 
 // New creates a new Cluster instance
-func New(logger *log.Entry, oxideURL, oxideToken, projectID string, controlPlanePrefix, workerPrefix string, controlPlaneCount, workerCount int, controlPlaneSpec, workerSpec NodeSpec, imageParallelism int, namespace, secretName string, kubeconfig, pubkey []byte, clusterInitWait time.Duration, kubeconfigOverwrite bool, tailscaleAPIKey, tailscaleTailnet, OCIimage string) *Cluster {
-	cfg := oxide.Config{
-		Host:  oxideURL,
-		Token: string(oxideToken),
-	}
-
+func New(logger *log.Entry, oxideConfig *oxide.Config, projectID string, controlPlanePrefix, workerPrefix string, controlPlaneCount, workerCount int, controlPlaneSpec, workerSpec NodeSpec, imageParallelism int, namespace, secretName string, kubeconfig, pubkey []byte, clusterInitWait time.Duration, kubeconfigOverwrite bool, tailscaleAPIKey, tailscaleTailnet, OCIimage string) *Cluster {
 	c := &Cluster{
 		logger:              logger.WithField("component", "cluster"),
-		oxideConfig:         &cfg,
+		oxideConfig:         oxideConfig,
 		projectID:           projectID,
 		controlPlanePrefix:  controlPlanePrefix,
 		workerPrefix:        workerPrefix,
