@@ -37,6 +37,7 @@ spec:
           command: ["/controller"]
           args: 
           - --no-pivot=true
+          - --verbose={{ .Values.verbose }}
           ports:
             - containerPort: {{ .Values.image.port }}
           env:

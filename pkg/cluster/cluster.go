@@ -11,7 +11,6 @@ import (
 
 	"github.com/aifoundry-org/oxide-controller/pkg/util"
 	"k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/rest"
 	"tailscale.com/client/tailscale/v2"
 
 	"github.com/oxidecomputer/oxide.go/oxide"
@@ -32,18 +31,18 @@ type Cluster struct {
 	controlPlaneSpec, workerSpec NodeSpec
 	secretName                   string
 	namespace                    string
-	kubeconfig, userPubkey       []byte
+	userPubkey                   []byte
 	controlPlaneIP               string
 	imageParallelism             int
 	tailscaleAPIKey              string
 	tailscaleTailnet             string
 	clientset                    *kubernetes.Clientset
-	apiConfig                    *rest.Config
+	apiConfig                    *Config
 	ociImage                     string
 }
 
 // New creates a new Cluster instance
-func New(logger *log.Entry, oxideConfig *oxide.Config, projectID string, controlPlanePrefix, workerPrefix string, controlPlaneCount, workerCount int, controlPlaneSpec, workerSpec NodeSpec, imageParallelism int, namespace, secretName string, kubeconfig, pubkey []byte, clusterInitWait time.Duration, kubeconfigOverwrite bool, tailscaleAPIKey, tailscaleTailnet, OCIimage string) *Cluster {
+func New(logger *log.Entry, oxideConfig *oxide.Config, projectID string, controlPlanePrefix, workerPrefix string, controlPlaneCount, workerCount int, controlPlaneSpec, workerSpec NodeSpec, imageParallelism int, namespace, secretName string, pubkey []byte, clusterInitWait time.Duration, kubeconfigOverwrite bool, tailscaleAPIKey, tailscaleTailnet, OCIimage string) *Cluster {
 	c := &Cluster{
 		logger:              logger.WithField("component", "cluster"),
 		oxideConfig:         oxideConfig,
@@ -54,7 +53,6 @@ func New(logger *log.Entry, oxideConfig *oxide.Config, projectID string, control
 		workerSpec:          workerSpec,
 		secretName:          secretName,
 		namespace:           namespace,
-		kubeconfig:          kubeconfig,
 		userPubkey:          pubkey,
 		clusterInitWait:     clusterInitWait,
 		kubeconfigOverwrite: kubeconfigOverwrite,
@@ -79,7 +77,6 @@ func (c *Cluster) ensureClusterExists(ctx context.Context) (newKubeconfig []byte
 	controlPlanePrefix := c.controlPlanePrefix
 	controlPlaneCount := c.controlPlaneCount
 	secretName := c.secretName
-	existingKubeconfig := c.kubeconfig
 
 	c.logger.Debugf("Checking if control plane IP %s exists", controlPlanePrefix)
 	controlPlaneIP, err := c.ensureControlPlaneIP(ctx, controlPlanePrefix)
@@ -114,12 +111,12 @@ func (c *Cluster) ensureClusterExists(ctx context.Context) (newKubeconfig []byte
 		return nil, nil
 	}
 
-	if len(controlPlaneNodes) > 0 && len(existingKubeconfig) > 0 {
+	if len(controlPlaneNodes) > 0 && c.apiConfig != nil && c.apiConfig.Source == ConfigSourceProvidedKubeconfig {
 		c.logger.Debugf("Found %d control plane nodes, but kubeconfig already exists", len(controlPlaneNodes))
 		// TODO: check to see if it can access the cluster
 	}
 
-	if len(controlPlaneNodes) == 0 && len(existingKubeconfig) > 0 && !c.kubeconfigOverwrite {
+	if len(controlPlaneNodes) == 0 && c.apiConfig != nil && c.apiConfig.Source == ConfigSourceProvidedKubeconfig && !c.kubeconfigOverwrite {
 		c.logger.Debugf("Found no control plane nodes, but kubeconfig already exists")
 		return nil, fmt.Errorf("kubeconfig already exists but cluster does not")
 	}
@@ -140,7 +137,6 @@ func (c *Cluster) ensureClusterExists(ctx context.Context) (newKubeconfig []byte
 		}
 	}
 
-	var kubeconfig = c.kubeconfig
 	// if we did not have any nodes, create a cluster
 	if len(controlPlaneNodes) == 0 {
 		highest++
@@ -302,7 +298,7 @@ func (c *Cluster) ensureClusterExists(ctx context.Context) (newKubeconfig []byte
 		}
 
 		// get the kubeconfig
-		kubeconfig, err = util.RunSSHCommand("root", fmt.Sprintf("%s:22", clusterAccessIP), priv, "cat /etc/rancher/k3s/k3s.yaml")
+		kubeconfig, err := util.RunSSHCommand("root", fmt.Sprintf("%s:22", clusterAccessIP), priv, "cat /etc/rancher/k3s/k3s.yaml")
 		if err != nil {
 			return nil, fmt.Errorf("failed to run command to retrieve kubeconfig on control plane node: %w", err)
 		}
@@ -313,20 +309,20 @@ func (c *Cluster) ensureClusterExists(ctx context.Context) (newKubeconfig []byte
 		kubeconfigString := string(kubeconfig)
 		re := regexp.MustCompile(`(server:\s*\w+://)(\d+\.\d+\.\d+\.\d+)(:\d+)`)
 		kubeconfigString = re.ReplaceAllString(kubeconfigString, fmt.Sprintf("${1}%s${3}", clusterAccessIP))
-		c.kubeconfig = []byte(kubeconfigString)
 
 		// if we have worker node count explicitly defined, save it
 		if c.workerCount > 0 {
 			secrets[secretKeyWorkerCount] = []byte(fmt.Sprintf("%d", c.workerCount))
 		}
+		newKubeconfig = []byte(kubeconfigString)
 
 		// get a Kubernetes client
-		apiConfig, err := getRestConfig(c.kubeconfig)
+		apiConfig, err := GetRestConfig(newKubeconfig)
 		if err != nil {
 			return nil, fmt.Errorf("failed to get rest config: %w", err)
 		}
 		c.apiConfig = apiConfig
-		clientset, err := getClientset(apiConfig)
+		clientset, err := getClientset(c.apiConfig.Config)
 		if err != nil {
 			return nil, fmt.Errorf("unable to get Kubernetes clientset: %w", err)
 		}
@@ -357,7 +353,7 @@ func (c *Cluster) ensureClusterExists(ctx context.Context) (newKubeconfig []byte
 	}
 
 	c.logger.Debugf("Completed %d control plane nodes exist with prefix %s", controlPlaneCount, controlPlanePrefix)
-	return c.kubeconfig, nil
+	return newKubeconfig, nil
 }
 
 func isCanonicalIPv4(s string) bool {

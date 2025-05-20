@@ -16,5 +16,6 @@ const (
 	secretKeyOxideURL         = "oxide-url"
 	maximumChunkSize          = 512 * KB
 
-	devModeOCIImage = "dev"
+	devModeOCIImage  = "dev"
+	utilityImageName = "alpine:3.21"
 )

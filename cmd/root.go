@@ -14,6 +14,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/aifoundry-org/oxide-controller/pkg/cluster"
+	logpkg "github.com/aifoundry-org/oxide-controller/pkg/log"
 	oxidepkg "github.com/aifoundry-org/oxide-controller/pkg/oxide"
 	"github.com/aifoundry-org/oxide-controller/pkg/server"
 	"github.com/aifoundry-org/oxide-controller/pkg/util"
@@ -74,6 +75,7 @@ func rootCmd() (*cobra.Command, error) {
 		Use:   "oxide-controller",
 		Short: "Oxide Kubernetes Management Service",
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+			logger.SetLevel(logpkg.GetLevel(verbose))
 			switch verbose {
 			case 0:
 				logger.SetLevel(log.InfoLevel)
@@ -108,6 +110,13 @@ func rootCmd() (*cobra.Command, error) {
 				return fmt.Errorf("failed to load kubeconfig at %s: %w", kubeconfigPath, err)
 			}
 
+			// with the kubeconfig, or not, we can get the *rest.Config and determine if we are in-cluster
+			restConfig, err := cluster.GetRestConfig(kubeconfig)
+			if err != nil {
+				return fmt.Errorf("failed to get kubeconfig: %w", err)
+			}
+			logentry.Debugf("Cluster authentication source: %v", restConfig.Source)
+
 			// scenarios for oxide:
 			// 1- oxideAPIURL and oxideToken are provided, use them
 			// 2- oxideProfile is provided, use it to get oxideAPIURL and oxideToken
@@ -129,12 +138,25 @@ func rootCmd() (*cobra.Command, error) {
 				}
 				oxideAPIURL = profileHost
 				oxideToken = profileToken
+			case restConfig.Source == cluster.ConfigSourceInCluster:
+				// we are in-cluster, try to load the oxide profile from the secret
+				logentry.Debugf("Loading oxide profile from in-cluster secret")
+				ctx := context.Background()
+				clusterToken, err := cluster.GetOxideToken(ctx, restConfig.Config, logentry, controlPlaneNamespace, controlPlaneSecret)
+				if err != nil {
+					return fmt.Errorf("failed to load oxide token from in-cluster secret: %w", err)
+				}
+				clusterHost, err := cluster.GetOxideURL(ctx, restConfig.Config, logentry, controlPlaneNamespace, controlPlaneSecret)
+				if err != nil {
+					return fmt.Errorf("failed to load oxide URL from in-cluster secret: %w", err)
+				}
+				oxideAPIURL = string(clusterHost)
+				oxideToken = string(clusterToken)
 			default:
 				// nothing provided, try to load the default
 				logentry.Debugf("Loading oxide default profile")
 				profileHost, profileToken, err := oxidepkg.GetProfile(&oxide.Config{UseDefaultProfile: true})
 				if err != nil {
-					// TODO: this should default do trying it in cluster
 					return fmt.Errorf("failed to load oxide default profile: %w", err)
 				}
 				oxideAPIURL = profileHost
@@ -200,7 +222,7 @@ func rootCmd() (*cobra.Command, error) {
 				cluster.NodeSpec{Image: cluster.Image{Name: controlPlaneImageName, Source: controlPlaneImageSource, Blocksize: controlPlaneImageBlocksize}, MemoryGB: int(controlPlaneMemory), CPUCount: int(controlPlaneCPU), ExternalIP: controlPlaneExternalIP, RootDiskSize: int(controlPlaneRootDiskSizeGB * cluster.GB), ExtraDiskSize: int(controlPlaneExtraDiskSizeGB * cluster.GB), TailscaleAuthKey: tailscaleAuthKey, TailscaleTag: tailscaleTag},
 				cluster.NodeSpec{Image: cluster.Image{Name: workerImageName, Source: workerImageSource, Blocksize: workerImageBlocksize}, MemoryGB: int(workerMemory), CPUCount: int(workerCPU), ExternalIP: workerExternalIP, RootDiskSize: int(workerRootDiskSizeGB * cluster.GB), ExtraDiskSize: int(workerExtraDiskSizeGB * cluster.GB), TailscaleAuthKey: tailscaleAuthKey, TailscaleTag: tailscaleTag},
 				imageParallelism,
-				controlPlaneNamespace, controlPlaneSecret, kubeconfig, pubkey,
+				controlPlaneNamespace, controlPlaneSecret, pubkey,
 				time.Duration(clusterInitWait)*time.Minute,
 				kubeconfigOverwrite,
 				tailscaleAPIKey,

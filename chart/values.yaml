@@ -2,6 +2,7 @@ namespace: oxide-controller-system
 createNamespace: true
 secretName: oxide-controller-secret
 useHostBinary: false
+verbose: 0
 image:
   repository: aifoundryorg/oxide-controller
   tag: latest

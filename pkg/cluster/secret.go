@@ -31,7 +31,7 @@ func getSecretValue(ctx context.Context, apiConfig *rest.Config, logger *log.Ent
 
 // GetJoinToken retrieves a new k3s worker join token from the Kubernetes cluster
 func (c *Cluster) GetJoinToken(ctx context.Context) (string, error) {
-	value, err := getSecretValue(ctx, c.apiConfig, c.logger, c.namespace, c.secretName, secretKeyJoinToken)
+	value, err := getSecretValue(ctx, c.apiConfig.Config, c.logger, c.namespace, c.secretName, secretKeyJoinToken)
 	if err != nil {
 		return "", err
 	}
@@ -43,7 +43,25 @@ func (c *Cluster) GetJoinToken(ctx context.Context) (string, error) {
 
 // GetUserSSHPublicKey retrieves the SSH public key from the Kubernetes cluster
 func (c *Cluster) GetUserSSHPublicKey(ctx context.Context) ([]byte, error) {
-	pubkey, err := getSecretValue(ctx, c.apiConfig, c.logger, c.namespace, c.secretName, secretKeyUserSSH)
+	pubkey, err := getSecretValue(ctx, c.apiConfig.Config, c.logger, c.namespace, c.secretName, secretKeyUserSSH)
+	if err != nil {
+		return nil, err
+	}
+	return pubkey, nil
+}
+
+// GetOxideToken retrieves the oxide token from the Kubernetes cluster
+func (c *Cluster) GetOxideToken(ctx context.Context) ([]byte, error) {
+	pubkey, err := getSecretValue(ctx, c.apiConfig.Config, c.logger, c.namespace, c.secretName, secretKeyOxideToken)
+	if err != nil {
+		return nil, err
+	}
+	return pubkey, nil
+}
+
+// GetOxideURL retrieves the oxide URL from the Kubernetes cluster
+func (c *Cluster) GetOxideURL(ctx context.Context) ([]byte, error) {
+	pubkey, err := getSecretValue(ctx, c.apiConfig.Config, c.logger, c.namespace, c.secretName, secretKeyOxideURL)
 	if err != nil {
 		return nil, err
 	}
@@ -52,7 +70,7 @@ func (c *Cluster) GetUserSSHPublicKey(ctx context.Context) ([]byte, error) {
 
 // GetWorkerCount retrieves the targeted worker count from the Kubernetes cluster
 func (c *Cluster) GetWorkerCount(ctx context.Context) (int, error) {
-	workerCount, err := getSecretValue(ctx, c.apiConfig, c.logger, c.namespace, c.secretName, secretKeyWorkerCount)
+	workerCount, err := getSecretValue(ctx, c.apiConfig.Config, c.logger, c.namespace, c.secretName, secretKeyWorkerCount)
 	if err != nil {
 		return 0, err
 	}
@@ -70,7 +88,7 @@ func (c *Cluster) GetWorkerCount(ctx context.Context) (int, error) {
 
 // SetWorkerCount sets the targeted worker count in the Kubernetes cluster
 func (c *Cluster) SetWorkerCount(ctx context.Context, count int) error {
-	secretMap, err := getSecret(ctx, c.apiConfig, c.logger, c.namespace, c.secretName)
+	secretMap, err := getSecret(ctx, c.apiConfig.Config, c.logger, c.namespace, c.secretName)
 	if err != nil {
 		return fmt.Errorf("failed to get secret: %w", err)
 	}
@@ -79,6 +97,24 @@ func (c *Cluster) SetWorkerCount(ctx context.Context, count int) error {
 		return fmt.Errorf("failed to save secret: %w", err)
 	}
 	return nil
+}
+
+// GetOxideToken retrieves the oxide token from the Kubernetes cluster
+func GetOxideToken(ctx context.Context, restConfig *rest.Config, logger *log.Entry, namespace, secretName string) ([]byte, error) {
+	pubkey, err := getSecretValue(ctx, restConfig, logger, namespace, secretName, secretKeyOxideToken)
+	if err != nil {
+		return nil, err
+	}
+	return pubkey, nil
+}
+
+// GetOxideURL retrieves the oxide URL from the Kubernetes cluster
+func GetOxideURL(ctx context.Context, restConfig *rest.Config, logger *log.Entry, namespace, secretName string) ([]byte, error) {
+	pubkey, err := getSecretValue(ctx, restConfig, logger, namespace, secretName, secretKeyOxideURL)
+	if err != nil {
+		return nil, err
+	}
+	return pubkey, nil
 }
 
 // getSecret gets the secret with all of our important information
