@@ -36,7 +36,7 @@ func (c *Cluster) LoadControllerToClusterNodes(ctx context.Context, infile io.Re
 	if err := deployPreloadBinaryDaemonSet(c.clientset, c.namespace, preloadBinaryName, labels); err != nil {
 		return fmt.Errorf("deploying preload-binary DaemonSet: %w", err)
 	}
-	if err := copyToAllDaemonSetPods(c.clientset, c.apiConfig, c.namespace, fmt.Sprintf("%s=%s", labelKey, labelValue), "writer", filepath.Join(containerDir, binaryName), infile); err != nil {
+	if err := copyToAllDaemonSetPods(c.clientset, c.apiConfig.Config, c.namespace, fmt.Sprintf("%s=%s", labelKey, labelValue), "writer", filepath.Join(containerDir, binaryName), infile); err != nil {
 		return fmt.Errorf("copying to all DaemonSet pods: %w", err)
 	}
 	if err := removePreloadBinaryDaemonSet(c.clientset, c.namespace, preloadBinaryName); err != nil {
@@ -165,7 +165,7 @@ func deployPreloadBinaryDaemonSet(clientset *kubernetes.Clientset, namespace, na
 					Containers: []corev1.Container{
 						{
 							Name:    "writer",
-							Image:   "busybox",
+							Image:   utilityImageName,
 							Command: []string{"sh", "-c", "sleep 3600"},
 							VolumeMounts: []corev1.VolumeMount{
 								{

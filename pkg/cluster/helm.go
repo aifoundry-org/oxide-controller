@@ -8,6 +8,7 @@ import (
 	"time"
 
 	ctrlr "github.com/aifoundry-org/oxide-controller"
+	logpkg "github.com/aifoundry-org/oxide-controller/pkg/log"
 
 	"github.com/distribution/distribution/v3/reference"
 	"helm.sh/helm/v3/pkg/action"
@@ -36,28 +37,26 @@ func (c *Cluster) LoadHelmCharts(ctx context.Context) error {
 		repo, tag     string
 		err           error
 		useHostBinary bool
+		imageToUse    = c.ociImage
 	)
 	// if flagged as dev mode, use the host binary, else determine it from the image
 	if c.ociImage == devModeOCIImage {
 		// Use the host binary for dev mode
 		useHostBinary = true
-		repo = "busybox"
-		tag = "latest"
-	} else {
-		repo, tag, err = parseImage(c.ociImage)
-		if err != nil {
-			return fmt.Errorf("failed to parse OCI image: %w", err)
-		}
-
+		imageToUse = utilityImageName
 	}
 
-	if repo == "dev" {
+	repo, tag, err = parseImage(imageToUse)
+	if err != nil {
+		return fmt.Errorf("failed to parse OCI image: %w", err)
 	}
+
 	values := map[string]interface{}{
 		"createNamespace": false,
 		"namespace":       c.namespace,
 		"secretName":      c.secretName,
 		"useHostBinary":   useHostBinary,
+		"verbose":         logpkg.GetFlag(c.logger.Logger.Level), // set logging in the controller to the same as our level
 		"image": map[string]interface{}{
 			"repository": repo,
 			"tag":        tag,
@@ -68,9 +67,7 @@ func (c *Cluster) LoadHelmCharts(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("failed to load chart files: %w", err)
 	}
-	fmt.Printf("values: %+v\n", values)
-	rel, err := installOrUpgradeEmbeddedChart(chartFiles, c.namespace, c.apiConfig, values)
-	fmt.Printf("manifest: %s\n", rel.Manifest)
+	rel, err := installOrUpgradeEmbeddedChart(chartFiles, c.namespace, c.apiConfig.Config, values)
 	if err != nil {
 		return fmt.Errorf("failed to install/upgrade helm chart: %w", err)
 	}
