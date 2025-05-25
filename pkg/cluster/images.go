@@ -10,6 +10,7 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
+	"github.com/aifoundry-org/oxide-controller/pkg/config"
 	"github.com/aifoundry-org/oxide-controller/pkg/util"
 	"github.com/oxidecomputer/oxide.go/oxide"
 	log "github.com/sirupsen/logrus"
@@ -24,7 +25,7 @@ const (
 // will be created at the project level.
 // The returned images will have their IDs set. It will have the exact same number of images as in the argument images.
 // This is not a member function of Cluster, as it can be self-contained and therefore tested.
-func ensureImagesExist(ctx context.Context, logger *log.Entry, client *oxide.Client, projectID string, parallelism int, images ...Image) ([]Image, error) {
+func ensureImagesExist(ctx context.Context, logger *log.Entry, client *oxide.Client, projectID string, parallelism int, images ...config.Image) ([]config.Image, error) {
 	// TODO: We don't need to list images, we can `View` them by name -
 	//       `images` array is never long, few more requests shouldn't harm.
 	// TODO: Do we need pagination? Using arbitrary limit for now.
@@ -41,9 +42,9 @@ func ensureImagesExist(ctx context.Context, logger *log.Entry, client *oxide.Cli
 	}
 	logger.Debugf("total global images %d", len(globalImages))
 	var (
-		missingImages   []Image
-		uniqueImages    []Image
-		targetImagesMap = make(map[string]Image)
+		missingImages   []config.Image
+		uniqueImages    []config.Image
+		targetImagesMap = make(map[string]config.Image)
 		projectImageMap = make(map[string]*oxide.Image)
 		globalImageMap  = make(map[string]*oxide.Image)
 		imageMap        = make(map[string]*oxide.Image)
