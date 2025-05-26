@@ -116,7 +116,11 @@ func rootCmd() (*cobra.Command, error) {
 			if err != nil {
 				return fmt.Errorf("failed to get kubeconfig: %w", err)
 			}
-			logentry.Debugf("Cluster authentication source: %v", restConfig.Source)
+			if restConfig == nil {
+				logentry.Debug("No valid kubeconfig found at startup")
+			} else {
+				logentry.Debugf("Cluster authentication source: %v", restConfig.Source)
+			}
 
 			// scenarios for oxide:
 			// 1- oxideAPIURL and oxideToken are provided, use them
@@ -139,7 +143,7 @@ func rootCmd() (*cobra.Command, error) {
 				}
 				oxideAPIURL = profileHost
 				oxideToken = profileToken
-			case restConfig.Source == cluster.ConfigSourceInCluster:
+			case restConfig != nil && restConfig.Source == cluster.ConfigSourceInCluster:
 				// we are in-cluster, try to load the oxide profile from the secret
 				logentry.Debugf("Loading oxide profile from in-cluster secret")
 				ctx := context.Background()

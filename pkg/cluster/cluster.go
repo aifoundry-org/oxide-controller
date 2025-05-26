@@ -294,7 +294,7 @@ func (c *Cluster) ensureClusterExists(ctx context.Context) (newKubeconfig []byte
 
 		// get a Kubernetes client
 		apiConfig, err := GetRestConfig(newKubeconfig)
-		if err != nil {
+		if err != nil || apiConfig == nil {
 			return nil, fmt.Errorf("failed to get rest config: %w", err)
 		}
 		c.apiConfig = apiConfig
