@@ -1,8 +1,6 @@
 package cluster
 
 import (
-	"fmt"
-
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
@@ -35,7 +33,6 @@ func getClientset(config *rest.Config) (*kubernetes.Clientset, error) {
 
 func GetRestConfig(kubeconfigRaw []byte) (*Config, error) {
 	if len(kubeconfigRaw) > 0 {
-		fmt.Println("Using provided kubeconfig")
 		configAPI, err := clientcmd.Load(kubeconfigRaw)
 		if err != nil {
 			return nil, err
@@ -46,20 +43,20 @@ func GetRestConfig(kubeconfigRaw []byte) (*Config, error) {
 	}
 	// try in-cluster
 	conf, err := rest.InClusterConfig()
-	fmt.Printf("Using in-cluster err: %v\n", err)
-	fmt.Printf("Using in-cluster config: %+v\n", conf)
 	if err == nil {
 		return &Config{Config: conf, Source: ConfigSourceInCluster}, err
 	}
 
 	// fall back to default config
-	fmt.Println("Trying default kubeconfig")
 	kubeconfig := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(
 		clientcmd.NewDefaultClientConfigLoadingRules(),
 		&clientcmd.ConfigOverrides{},
 	)
 	config, err := kubeconfig.ClientConfig()
-	fmt.Printf("Using default kubeconfig err: %v\n", err)
-	fmt.Printf("Using default kubeconfig config: %+v\n", config)
+	// if we did not find one, return an error, but indicate that we could not find any,
+	// rather than an error in the config itself
+	if err != nil && clientcmd.IsEmptyConfig(err) {
+		return nil, nil
+	}
 	return &Config{Config: config, Source: ConfigSourceDefaultKubeconfig}, err
 }
