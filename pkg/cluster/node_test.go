@@ -1,6 +1,10 @@
 package cluster
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/google/go-cmp/cmp"
+)
 
 func TestGenerateCloudConfig(t *testing.T) {
 	tests := []struct {
@@ -18,8 +22,14 @@ func TestGenerateCloudConfig(t *testing.T) {
 runcmd:
   - |
     PRIVATE_IP=$(hostname -I | awk '{print $1}')
+    [ -n "${PRIVATE_IP}" ] && K3S_PRIVATE_IP_ARG="--tls-san ${PRIVATE_IP}"
+    echo "Private IP: ${PRIVATE_IP}"
+    echo "Private IP k3s arg: ${K3S_PRIVATE_IP_ARG}"
     PUBLIC_IP=$(curl -s https://ifconfig.me)
-    curl -sfL https://get.k3s.io | sh -s - server --cluster-init --tls-san 10.0.0.5 --node-external-ip 10.0.0.5 --tls-san ${PRIVATE_IP} --tls-san ${PUBLIC_IP}
+    [ -n "${PUBLIC_IP}" ] && K3S_PUBLIC_IP_ARG="--tls-san ${PUBLIC_IP}"
+    echo "Public IP: ${PUBLIC_IP}"
+    echo "Public IP k3s arg: ${K3S_PUBLIC_IP_ARG}"
+    curl -sfL https://get.k3s.io | sh -s - server --cluster-init --tls-san 10.0.0.5 --node-external-ip 10.0.0.5 ${K3S_PRIVATE_IP_ARG} ${K3S_PUBLIC_IP_ARG}
 users:
   - name: root
     shell: /bin/bash
@@ -33,8 +43,14 @@ allow_public_ssh_keys: true
 runcmd:
   - |
     PRIVATE_IP=$(hostname -I | awk '{print $1}')
+    [ -n "${PRIVATE_IP}" ] && K3S_PRIVATE_IP_ARG="--tls-san ${PRIVATE_IP}"
+    echo "Private IP: ${PRIVATE_IP}"
+    echo "Private IP k3s arg: ${K3S_PRIVATE_IP_ARG}"
     PUBLIC_IP=$(curl -s https://ifconfig.me)
-    curl -sfL https://get.k3s.io | sh -s - server --cluster-init --tls-san 10.0.0.5 --node-external-ip 10.0.0.5 --tls-san ${PRIVATE_IP} --tls-san ${PUBLIC_IP}
+    [ -n "${PUBLIC_IP}" ] && K3S_PUBLIC_IP_ARG="--tls-san ${PUBLIC_IP}"
+    echo "Public IP: ${PUBLIC_IP}"
+    echo "Public IP k3s arg: ${K3S_PUBLIC_IP_ARG}"
+    curl -sfL https://get.k3s.io | sh -s - server --cluster-init --tls-san 10.0.0.5 --node-external-ip 10.0.0.5 ${K3S_PRIVATE_IP_ARG} ${K3S_PUBLIC_IP_ARG}
 ssh_pwauth: false
 disable_root: false
 allow_public_ssh_keys: true
@@ -43,8 +59,14 @@ allow_public_ssh_keys: true
 runcmd:
   - |
     PRIVATE_IP=$(hostname -I | awk '{print $1}')
+    [ -n "${PRIVATE_IP}" ] && K3S_PRIVATE_IP_ARG="--tls-san ${PRIVATE_IP}"
+    echo "Private IP: ${PRIVATE_IP}"
+    echo "Private IP k3s arg: ${K3S_PRIVATE_IP_ARG}"
     PUBLIC_IP=$(curl -s https://ifconfig.me)
-    curl -sfL https://get.k3s.io | sh -s - server --server https://10.0.0.5:6443 --token joinme --tls-san ${PRIVATE_IP} --tls-san ${PUBLIC_IP}
+    [ -n "${PUBLIC_IP}" ] && K3S_PUBLIC_IP_ARG="--tls-san ${PUBLIC_IP}"
+    echo "Public IP: ${PUBLIC_IP}"
+    echo "Public IP k3s arg: ${K3S_PUBLIC_IP_ARG}"
+    curl -sfL https://get.k3s.io | sh -s - server --server https://10.0.0.5:6443 --token joinme ${K3S_PRIVATE_IP_ARG} ${K3S_PUBLIC_IP_ARG}
 users:
   - name: root
     shell: /bin/bash
@@ -58,8 +80,14 @@ allow_public_ssh_keys: true
 runcmd:
   - |
     PRIVATE_IP=$(hostname -I | awk '{print $1}')
+    [ -n "${PRIVATE_IP}" ] && K3S_PRIVATE_IP_ARG="--tls-san ${PRIVATE_IP}"
+    echo "Private IP: ${PRIVATE_IP}"
+    echo "Private IP k3s arg: ${K3S_PRIVATE_IP_ARG}"
     PUBLIC_IP=$(curl -s https://ifconfig.me)
-    curl -sfL https://get.k3s.io | sh -s - server --server https://10.0.0.5:6443 --token joinme --tls-san ${PRIVATE_IP} --tls-san ${PUBLIC_IP}
+    [ -n "${PUBLIC_IP}" ] && K3S_PUBLIC_IP_ARG="--tls-san ${PUBLIC_IP}"
+    echo "Public IP: ${PUBLIC_IP}"
+    echo "Public IP k3s arg: ${K3S_PUBLIC_IP_ARG}"
+    curl -sfL https://get.k3s.io | sh -s - server --server https://10.0.0.5:6443 --token joinme ${K3S_PRIVATE_IP_ARG} ${K3S_PUBLIC_IP_ARG}
 ssh_pwauth: false
 disable_root: false
 allow_public_ssh_keys: true
@@ -68,7 +96,13 @@ allow_public_ssh_keys: true
 runcmd:
   - |
     PRIVATE_IP=$(hostname -I | awk '{print $1}')
+    [ -n "${PRIVATE_IP}" ] && K3S_PRIVATE_IP_ARG="--tls-san ${PRIVATE_IP}"
+    echo "Private IP: ${PRIVATE_IP}"
+    echo "Private IP k3s arg: ${K3S_PRIVATE_IP_ARG}"
     PUBLIC_IP=$(curl -s https://ifconfig.me)
+    [ -n "${PUBLIC_IP}" ] && K3S_PUBLIC_IP_ARG="--tls-san ${PUBLIC_IP}"
+    echo "Public IP: ${PUBLIC_IP}"
+    echo "Public IP k3s arg: ${K3S_PUBLIC_IP_ARG}"
     curl -sfL https://get.k3s.io | sh -s - agent --server https://10.0.0.5:6443 --token joinme
 users:
   - name: root
@@ -83,7 +117,13 @@ allow_public_ssh_keys: true
 runcmd:
   - |
     PRIVATE_IP=$(hostname -I | awk '{print $1}')
+    [ -n "${PRIVATE_IP}" ] && K3S_PRIVATE_IP_ARG="--tls-san ${PRIVATE_IP}"
+    echo "Private IP: ${PRIVATE_IP}"
+    echo "Private IP k3s arg: ${K3S_PRIVATE_IP_ARG}"
     PUBLIC_IP=$(curl -s https://ifconfig.me)
+    [ -n "${PUBLIC_IP}" ] && K3S_PUBLIC_IP_ARG="--tls-san ${PUBLIC_IP}"
+    echo "Public IP: ${PUBLIC_IP}"
+    echo "Public IP k3s arg: ${K3S_PUBLIC_IP_ARG}"
     curl -sfL https://get.k3s.io | sh -s - agent --server https://10.0.0.5:6443 --token joinme
 ssh_pwauth: false
 disable_root: false
@@ -98,8 +138,8 @@ allow_public_ssh_keys: true
 				t.Errorf("expected error %v, got %v", tt.err, err)
 			}
 			resultStr := string(result)
-			if resultStr != tt.expected {
-				t.Errorf("expected %s, got %s", tt.expected, resultStr)
+			if diff := cmp.Diff(tt.expected, resultStr); diff != "" {
+				t.Errorf("Mismatch (-want +got):\n%s", diff)
 			}
 		})
 	}

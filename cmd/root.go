@@ -14,6 +14,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/aifoundry-org/oxide-controller/pkg/cluster"
+	"github.com/aifoundry-org/oxide-controller/pkg/config"
 	logpkg "github.com/aifoundry-org/oxide-controller/pkg/log"
 	oxidepkg "github.com/aifoundry-org/oxide-controller/pkg/oxide"
 	"github.com/aifoundry-org/oxide-controller/pkg/server"
@@ -163,11 +164,6 @@ func rootCmd() (*cobra.Command, error) {
 				oxideToken = profileToken
 			}
 
-			oxideConfig := &oxide.Config{
-				Host:  oxideAPIURL,
-				Token: string(oxideToken),
-			}
-
 			if strings.HasPrefix(oxideToken, "file:") {
 				tokenFilePath := strings.TrimPrefix(oxideToken, "file:")
 				oxideToken = ""
@@ -216,18 +212,56 @@ func rootCmd() (*cobra.Command, error) {
 			cmd.SilenceUsage = true
 
 			ctx := context.Background()
+			controllerConfig := &config.ControllerConfig{
+				UserSSHPublicKey:  string(pubkey),
+				OxideToken:        oxideToken,
+				OxideURL:          oxideAPIURL,
+				ClusterProject:    clusterProject,
+				ControlPlaneCount: controlPlaneCount,
+				ControlPlaneSpec: config.NodeSpec{
+					Image:            config.Image{Name: controlPlaneImageName, Source: controlPlaneImageSource, Blocksize: controlPlaneImageBlocksize},
+					Prefix:           controlPlanePrefix,
+					MemoryGB:         int(controlPlaneMemory),
+					CPUCount:         int(controlPlaneCPU),
+					ExternalIP:       controlPlaneExternalIP,
+					RootDiskSize:     int(controlPlaneRootDiskSizeGB * cluster.GB),
+					ExtraDiskSize:    int(controlPlaneExtraDiskSizeGB * cluster.GB),
+					TailscaleAuthKey: tailscaleAuthKey,
+					TailscaleTag:     tailscaleTag,
+				},
+				WorkerCount: workerCount,
+				WorkerSpec: config.NodeSpec{
+					Image:            config.Image{Name: workerImageName, Source: workerImageSource, Blocksize: workerImageBlocksize},
+					Prefix:           workerPrefix,
+					MemoryGB:         int(workerMemory),
+					CPUCount:         int(workerCPU),
+					ExternalIP:       workerExternalIP,
+					RootDiskSize:     int(workerRootDiskSizeGB * cluster.GB),
+					ExtraDiskSize:    int(workerExtraDiskSizeGB * cluster.GB),
+					TailscaleAuthKey: tailscaleAuthKey,
+					TailscaleTag:     tailscaleTag,
+				},
 
-			c := cluster.New(logentry, oxideConfig, clusterProject,
-				controlPlanePrefix, workerPrefix, int(controlPlaneCount), int(workerCount),
-				cluster.NodeSpec{Image: cluster.Image{Name: controlPlaneImageName, Source: controlPlaneImageSource, Blocksize: controlPlaneImageBlocksize}, MemoryGB: int(controlPlaneMemory), CPUCount: int(controlPlaneCPU), ExternalIP: controlPlaneExternalIP, RootDiskSize: int(controlPlaneRootDiskSizeGB * cluster.GB), ExtraDiskSize: int(controlPlaneExtraDiskSizeGB * cluster.GB), TailscaleAuthKey: tailscaleAuthKey, TailscaleTag: tailscaleTag},
-				cluster.NodeSpec{Image: cluster.Image{Name: workerImageName, Source: workerImageSource, Blocksize: workerImageBlocksize}, MemoryGB: int(workerMemory), CPUCount: int(workerCPU), ExternalIP: workerExternalIP, RootDiskSize: int(workerRootDiskSizeGB * cluster.GB), ExtraDiskSize: int(workerExtraDiskSizeGB * cluster.GB), TailscaleAuthKey: tailscaleAuthKey, TailscaleTag: tailscaleTag},
-				imageParallelism,
-				controlPlaneNamespace, controlPlaneSecret, pubkey,
-				time.Duration(clusterInitWait)*time.Minute,
+				ControlPlaneNamespace: controlPlaneNamespace,
+				SecretName:            controlPlaneSecret,
+				Address:               address,
+				ControlLoopMins:       controlLoopMins,
+				ImageParallelism:      imageParallelism,
+				TailscaleAuthKey:      tailscaleAuthKey,
+				TailscaleAPIKey:       tailscaleAPIKey,
+				TailscaleTag:          tailscaleTag,
+				TailscaleTailnet:      tailscaleTailnet,
+			}
+			c := cluster.New(
+				logentry,
+				controllerConfig,
 				kubeconfigOverwrite,
-				tailscaleAPIKey,
-				tailscaleTailnet,
 				controllerOCIImage,
+				time.Duration(clusterInitWait)*time.Minute,
+
+				/*
+					pubkey,
+				*/
 			)
 			// we perform 2 execution loops of the cluster execute function:
 			// - the first one is to create the cluster and get the kubeconfig

@@ -2,10 +2,10 @@ package cluster
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
-	"strconv"
-	"strings"
 
+	"github.com/aifoundry-org/oxide-controller/pkg/config"
 	log "github.com/sirupsen/logrus"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -14,107 +14,69 @@ import (
 	"k8s.io/client-go/rest"
 )
 
-// getSecretValue retrieves a specific value from the secret
-func getSecretValue(ctx context.Context, apiConfig *rest.Config, logger *log.Entry, namespace, secret, key string) ([]byte, error) {
-	logger.Debugf("Getting secret value for key '%s' from secret '%s'", key, secret)
-	secretData, err := getSecret(ctx, apiConfig, logger, namespace, secret)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get secret: %w", err)
-	}
-	value, ok := secretData[key]
-	if !ok {
-		return nil, NewSecretKeyNotFoundError(key)
-	}
-	// no need to base64-decode, since the API returns the raw secret
-	return value, nil
-}
-
 // GetJoinToken retrieves a new k3s worker join token from the Kubernetes cluster
 func (c *Cluster) GetJoinToken(ctx context.Context) (string, error) {
-	value, err := getSecretValue(ctx, c.apiConfig.Config, c.logger, c.namespace, c.secretName, secretKeyJoinToken)
+	conf, err := getSecretConfig(ctx, c.apiConfig.Config, c.logger, c.config.ControlPlaneNamespace, c.config.SecretName)
 	if err != nil {
 		return "", err
 	}
-	// convert to string
-	valStr := string(value)
-	// remove trailing newlines
-	return strings.TrimSuffix(valStr, "\n"), nil
+	return conf.K3sJoinToken, nil
 }
 
 // GetUserSSHPublicKey retrieves the SSH public key from the Kubernetes cluster
 func (c *Cluster) GetUserSSHPublicKey(ctx context.Context) ([]byte, error) {
-	pubkey, err := getSecretValue(ctx, c.apiConfig.Config, c.logger, c.namespace, c.secretName, secretKeyUserSSH)
+	conf, err := getSecretConfig(ctx, c.apiConfig.Config, c.logger, c.config.ControlPlaneNamespace, c.config.SecretName)
 	if err != nil {
 		return nil, err
 	}
-	return pubkey, nil
+	return []byte(conf.UserSSHPublicKey), nil
 }
 
 // GetOxideToken retrieves the oxide token from the Kubernetes cluster
 func (c *Cluster) GetOxideToken(ctx context.Context) ([]byte, error) {
-	pubkey, err := getSecretValue(ctx, c.apiConfig.Config, c.logger, c.namespace, c.secretName, secretKeyOxideToken)
-	if err != nil {
-		return nil, err
-	}
-	return pubkey, nil
+	return GetOxideToken(ctx, c.apiConfig.Config, c.logger, c.config.ControlPlaneNamespace, c.config.SecretName)
 }
 
 // GetOxideURL retrieves the oxide URL from the Kubernetes cluster
 func (c *Cluster) GetOxideURL(ctx context.Context) ([]byte, error) {
-	pubkey, err := getSecretValue(ctx, c.apiConfig.Config, c.logger, c.namespace, c.secretName, secretKeyOxideURL)
-	if err != nil {
-		return nil, err
-	}
-	return pubkey, nil
+	return GetOxideURL(ctx, c.apiConfig.Config, c.logger, c.config.ControlPlaneNamespace, c.config.SecretName)
 }
 
 // GetWorkerCount retrieves the targeted worker count from the Kubernetes cluster
 func (c *Cluster) GetWorkerCount(ctx context.Context) (int, error) {
-	workerCount, err := getSecretValue(ctx, c.apiConfig.Config, c.logger, c.namespace, c.secretName, secretKeyWorkerCount)
+	conf, err := getSecretConfig(ctx, c.apiConfig.Config, c.logger, c.config.ControlPlaneNamespace, c.config.SecretName)
 	if err != nil {
 		return 0, err
 	}
-	// convert to string
-	valStr := string(workerCount)
-	// remove trailing newlines
-	valStr = strings.TrimSuffix(valStr, "\n")
-	// convert to int
-	count, err := strconv.Atoi(valStr)
-	if err != nil {
-		return 0, fmt.Errorf("failed to convert worker count to int: %w", err)
-	}
-	return count, nil
+	return int(conf.WorkerCount), nil
 }
 
 // SetWorkerCount sets the targeted worker count in the Kubernetes cluster
 func (c *Cluster) SetWorkerCount(ctx context.Context, count int) error {
-	secretMap, err := getSecret(ctx, c.apiConfig.Config, c.logger, c.namespace, c.secretName)
+	conf, err := getSecretConfig(ctx, c.apiConfig.Config, c.logger, c.config.ControlPlaneNamespace, c.config.SecretName)
 	if err != nil {
 		return fmt.Errorf("failed to get secret: %w", err)
 	}
-	secretMap[secretKeyWorkerCount] = []byte(fmt.Sprintf("%d", count))
-	if err := saveSecret(ctx, c.clientset, c.logger, c.namespace, c.secretName, secretMap); err != nil {
-		return fmt.Errorf("failed to save secret: %w", err)
-	}
-	return nil
+	conf.WorkerCount = uint(count)
+	return setSecretConfig(ctx, c.apiConfig.Config, c.logger, c.config.ControlPlaneNamespace, c.config.SecretName, conf)
 }
 
 // GetOxideToken retrieves the oxide token from the Kubernetes cluster
 func GetOxideToken(ctx context.Context, restConfig *rest.Config, logger *log.Entry, namespace, secretName string) ([]byte, error) {
-	pubkey, err := getSecretValue(ctx, restConfig, logger, namespace, secretName, secretKeyOxideToken)
+	conf, err := getSecretConfig(ctx, restConfig, logger, namespace, secretName)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to get secret: %w", err)
 	}
-	return pubkey, nil
+	return []byte(conf.OxideToken), nil
 }
 
 // GetOxideURL retrieves the oxide URL from the Kubernetes cluster
 func GetOxideURL(ctx context.Context, restConfig *rest.Config, logger *log.Entry, namespace, secretName string) ([]byte, error) {
-	pubkey, err := getSecretValue(ctx, restConfig, logger, namespace, secretName, secretKeyOxideURL)
+	conf, err := getSecretConfig(ctx, restConfig, logger, namespace, secretName)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to get secret: %w", err)
 	}
-	return pubkey, nil
+	return []byte(conf.OxideURL), nil
 }
 
 // getSecret gets the secret with all of our important information
@@ -171,4 +133,58 @@ func saveSecret(ctx context.Context, clientset *kubernetes.Clientset, logger *lo
 		return fmt.Errorf("failed to update secret: %w", err)
 	}
 	return nil
+}
+
+// getSecretValue retrieves a specific value from the secret
+func getSecretValue(ctx context.Context, apiConfig *rest.Config, logger *log.Entry, namespace, secret, key string) ([]byte, error) {
+	logger.Debugf("Getting secret value for key '%s' from secret '%s'", key, secret)
+	secretData, err := getSecret(ctx, apiConfig, logger, namespace, secret)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get secret: %w", err)
+	}
+	value, ok := secretData[key]
+	if !ok {
+		return nil, NewSecretKeyNotFoundError(key)
+	}
+	// no need to base64-decode, since the API returns the raw secret
+	return value, nil
+}
+
+// setSecretValue sets a specific value in the secret
+func setSecretValue(ctx context.Context, apiConfig *rest.Config, logger *log.Entry, namespace, secret, key string, value []byte) error {
+	logger.Debugf("Setting secret value for key '%s' in secret '%s'", key, secret)
+	secretData, err := getSecret(ctx, apiConfig, logger, namespace, secret)
+	if err != nil {
+		return fmt.Errorf("failed to get secret: %w", err)
+	}
+	secretData[key] = value
+	clientset, err := getClientset(apiConfig)
+	if err != nil {
+		return fmt.Errorf("failed to get Kubernetes clientset: %w", err)
+	}
+	return saveSecret(ctx, clientset, logger, namespace, secret, secretData)
+}
+
+// func getSecretValue(ctx context.Context, apiConfig *rest.Config, logger *log.Entry, namespace, secret, key string) ([]byte, error) {
+func getSecretConfig(ctx context.Context, apiConfig *rest.Config, logger *log.Entry, namespace, secret string) (*config.ControllerConfig, error) {
+	logger.Debugf("Getting controller config from secret '%s'", secret)
+	data, err := getSecretValue(ctx, apiConfig, logger, namespace, secret, secretKeyConfig)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get controller config: %w", err)
+	}
+	var config config.ControllerConfig
+	if err := json.Unmarshal(data, &config); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal controller config: %w", err)
+	}
+	return &config, nil
+}
+
+// func setSecretValue(ctx context.Context, apiConfig *rest.Config, logger *log.Entry, namespace, secret, key string) ([]byte, error) {
+func setSecretConfig(ctx context.Context, apiConfig *rest.Config, logger *log.Entry, namespace, secret string, conf *config.ControllerConfig) error {
+	logger.Debugf("Getting controller config from secret '%s'", secret)
+	b, err := conf.ToJSON()
+	if err != nil {
+		return fmt.Errorf("failed to marshal controller config: %w", err)
+	}
+	return setSecretValue(ctx, apiConfig, logger, namespace, secret, secretKeyConfig, b)
 }

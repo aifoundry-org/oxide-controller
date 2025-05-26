@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/aifoundry-org/oxide-controller/pkg/config"
 	"github.com/aifoundry-org/oxide-controller/pkg/util"
 	"github.com/google/uuid"
 	"github.com/oxidecomputer/oxide.go/oxide"
@@ -23,7 +24,7 @@ const (
 	extraMount = "/data"
 )
 
-func CreateInstance(ctx context.Context, client *oxide.Client, projectID, instanceName string, spec NodeSpec, cloudConfig string) (*oxide.Instance, error) {
+func CreateInstance(ctx context.Context, client *oxide.Client, projectID, instanceName string, spec config.NodeSpec, cloudConfig string) (*oxide.Instance, error) {
 	// every disk needs a unique name. Unfortunately, due to a bug in how
 	// the disks are provided a controller, if the first 20 characters are the same
 	// then you end up with controller conflicts.
@@ -146,6 +147,17 @@ func GenerateCloudConfig(nodeType string, initCluster bool, controlPlaneIP, join
 		})
 	}
 
+	k3sRunCmd := []string{
+		`PRIVATE_IP=$(hostname -I | awk '{print $1}')`,
+		`[ -n "${PRIVATE_IP}" ] && K3S_PRIVATE_IP_ARG="--tls-san ${PRIVATE_IP}"`,
+		`echo "Private IP: ${PRIVATE_IP}"`,
+		`echo "Private IP k3s arg: ${K3S_PRIVATE_IP_ARG}"`,
+		`PUBLIC_IP=$(curl -s https://ifconfig.me)`,
+		`[ -n "${PUBLIC_IP}" ] && K3S_PUBLIC_IP_ARG="--tls-san ${PUBLIC_IP}"`,
+		`echo "Public IP: ${PUBLIC_IP}"`,
+		`echo "Public IP k3s arg: ${K3S_PUBLIC_IP_ARG}"`,
+	}
+
 	// k3s
 	switch nodeType {
 	case "server":
@@ -158,7 +170,7 @@ func GenerateCloudConfig(nodeType string, initCluster bool, controlPlaneIP, join
 			k3sArgs = append(k3sArgs, fmt.Sprintf("--server https://%s:%d", controlPlaneIP, port))
 			k3sArgs = append(k3sArgs, fmt.Sprintf("--token %s", joinToken))
 		}
-		k3sArgs = append(k3sArgs, "--tls-san ${PRIVATE_IP} --tls-san ${PUBLIC_IP}")
+		k3sArgs = append(k3sArgs, "${K3S_PRIVATE_IP_ARG} ${K3S_PUBLIC_IP_ARG}")
 		// add the tailscale IP if provided
 		if tailscaleAuthKey != "" {
 			k3sArgs = append(k3sArgs, "--tls-san ${TAILSCALE_IP}")
@@ -170,11 +182,8 @@ func GenerateCloudConfig(nodeType string, initCluster bool, controlPlaneIP, join
 	default:
 		return nil, fmt.Errorf("unknown node type: %s", nodeType)
 	}
-	cfg.RunCmd = append(cfg.RunCmd, []string{
-		"PRIVATE_IP=$(hostname -I | awk '{print $1}')",
-		"PUBLIC_IP=$(curl -s https://ifconfig.me)",
-		fmt.Sprintf("curl -sfL https://get.k3s.io | sh -s - %s", strings.Join(k3sArgs, " ")),
-	})
+	k3sRunCmd = append(k3sRunCmd, fmt.Sprintf("curl -sfL https://get.k3s.io | sh -s - %s", strings.Join(k3sArgs, " ")))
+	cfg.RunCmd = append(cfg.RunCmd, k3sRunCmd)
 
 	// encode
 	var buf bytes.Buffer
@@ -197,7 +206,7 @@ func (c *Cluster) CreateControlPlaneNodes(ctx context.Context, initCluster bool,
 		return nil, fmt.Errorf("failed to create Oxide API client: %v", err)
 	}
 	var controlPlaneNodes []oxide.Instance
-	c.logger.Debugf("Creating %d control plane nodes with prefix %s", count, c.controlPlanePrefix)
+	c.logger.Debugf("Creating %d control plane nodes with prefix %s", count, c.config.ControlPlaneSpec.Prefix)
 
 	var joinToken string
 	var pubkey []byte
@@ -222,22 +231,22 @@ func (c *Cluster) CreateControlPlaneNodes(ctx context.Context, initCluster bool,
 		pubKeyList = append(pubKeyList, additionalPubKeys...)
 	}
 	var extraNodeDisk string
-	if c.controlPlaneSpec.ExtraDiskSize > 0 {
+	if c.config.ControlPlaneSpec.ExtraDiskSize > 0 {
 		extraNodeDisk = extraDisk
 	}
-	cloudConfig, err := GenerateCloudConfigB64("server", initCluster, c.controlPlaneIP, joinToken, pubKeyList, extraNodeDisk, c.controlPlaneSpec.TailscaleAuthKey, c.controlPlaneSpec.TailscaleTag)
+	cloudConfig, err := GenerateCloudConfigB64("server", initCluster, c.config.ControlPlaneIP, joinToken, pubKeyList, extraNodeDisk, c.config.ControlPlaneSpec.TailscaleAuthKey, c.config.ControlPlaneSpec.TailscaleTag)
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate cloud config: %w", err)
 	}
 
 	for i := start; i < start+count; i++ {
-		instance, err := CreateInstance(ctx, client, c.projectID, fmt.Sprintf("%s%d", c.controlPlanePrefix, i), c.controlPlaneSpec, cloudConfig)
+		instance, err := CreateInstance(ctx, client, c.projectID, fmt.Sprintf("%s%d", c.config.ControlPlaneSpec.Prefix, i), c.config.ControlPlaneSpec, cloudConfig)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create control plane node: %w", err)
 		}
 		controlPlaneNodes = append(controlPlaneNodes, *instance)
 	}
-	c.logger.Debugf("Created %d control plane nodes with prefix %s", count, c.controlPlanePrefix)
+	c.logger.Debugf("Created %d control plane nodes with prefix %s", count, c.config.ControlPlaneSpec.Prefix)
 	return controlPlaneNodes, nil
 }
 
@@ -256,7 +265,7 @@ func (c *Cluster) EnsureWorkerNodes(ctx context.Context) ([]oxide.Instance, erro
 			return nil, fmt.Errorf("failed to get worker count: %w", err)
 		}
 		c.logger.Debugf("Failed to get worker count from cluster, using CLI flag value and storing")
-		count = c.workerCount
+		count = int(c.config.WorkerCount)
 		if err := c.SetWorkerCount(ctx, count); err != nil {
 			return nil, fmt.Errorf("failed to set worker count: %w", err)
 		}
@@ -265,7 +274,7 @@ func (c *Cluster) EnsureWorkerNodes(ctx context.Context) ([]oxide.Instance, erro
 	c.logger.Debugf("Ensuring %d worker nodes", count)
 	var nodes []oxide.Instance
 	// first check how many worker nodes we have, by asking the cluster
-	_, workers, err := getNodesOxide(ctx, c.logger, client, c.projectID, c.controlPlanePrefix, c.workerPrefix)
+	_, workers, err := getNodesOxide(ctx, c.logger, client, c.projectID, c.config.ControlPlaneSpec.Prefix, c.config.WorkerSpec.Prefix)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get nodes: %w", err)
 	}
@@ -290,23 +299,23 @@ func (c *Cluster) EnsureWorkerNodes(ctx context.Context) ([]oxide.Instance, erro
 		pubkeys = append(pubkeys, string(pubkey))
 	}
 	var extraNodeDisk string
-	if c.workerSpec.ExtraDiskSize > 0 {
+	if c.config.WorkerSpec.ExtraDiskSize > 0 {
 		extraNodeDisk = extraDisk
 	}
-	cloudConfig, err := GenerateCloudConfigB64("agent", false, c.controlPlaneIP, joinToken, pubkeys, extraNodeDisk, c.workerSpec.TailscaleAuthKey, c.workerSpec.TailscaleTag)
+	cloudConfig, err := GenerateCloudConfigB64("agent", false, c.config.ControlPlaneIP, joinToken, pubkeys, extraNodeDisk, c.config.WorkerSpec.TailscaleAuthKey, c.config.WorkerSpec.TailscaleTag)
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate cloud config: %w", err)
 	}
 
 	for i := actualCount; i < int(count); i++ {
-		workerName := fmt.Sprintf("%s%d", c.workerPrefix, time.Now().Unix())
-		instance, err := CreateInstance(ctx, client, c.projectID, workerName, c.workerSpec, cloudConfig)
+		workerName := fmt.Sprintf("%s%d", c.config.WorkerSpec.Prefix, time.Now().Unix())
+		instance, err := CreateInstance(ctx, client, c.projectID, workerName, c.config.WorkerSpec, cloudConfig)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create worker node: %w", err)
 		}
 		nodes = append(nodes, *instance)
 	}
-	c.logger.Debugf("Created %d worker nodes with prefix %s", count, c.workerPrefix)
+	c.logger.Debugf("Created %d worker nodes with prefix %s", count, c.config.WorkerSpec.Prefix)
 	return nodes, nil
 }
 

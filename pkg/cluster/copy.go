@@ -33,13 +33,13 @@ func (c *Cluster) LoadControllerToClusterNodes(ctx context.Context, infile io.Re
 	labelKey := "app"
 	labelValue := "preload-binary"
 	labels := map[string]string{labelKey: labelValue}
-	if err := deployPreloadBinaryDaemonSet(c.clientset, c.namespace, preloadBinaryName, labels); err != nil {
+	if err := deployPreloadBinaryDaemonSet(c.clientset, c.config.ControlPlaneNamespace, preloadBinaryName, labels); err != nil {
 		return fmt.Errorf("deploying preload-binary DaemonSet: %w", err)
 	}
-	if err := copyToAllDaemonSetPods(c.clientset, c.apiConfig.Config, c.namespace, fmt.Sprintf("%s=%s", labelKey, labelValue), "writer", filepath.Join(containerDir, binaryName), infile); err != nil {
+	if err := copyToAllDaemonSetPods(c.clientset, c.apiConfig.Config, c.config.ControlPlaneNamespace, fmt.Sprintf("%s=%s", labelKey, labelValue), "writer", filepath.Join(containerDir, binaryName), infile); err != nil {
 		return fmt.Errorf("copying to all DaemonSet pods: %w", err)
 	}
-	if err := removePreloadBinaryDaemonSet(c.clientset, c.namespace, preloadBinaryName); err != nil {
+	if err := removePreloadBinaryDaemonSet(c.clientset, c.config.ControlPlaneNamespace, preloadBinaryName); err != nil {
 		return fmt.Errorf("removing preload-binary DaemonSet: %w", err)
 	}
 	// update our OCI image to point to the new image

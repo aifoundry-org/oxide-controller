@@ -53,8 +53,8 @@ func (c *Cluster) LoadHelmCharts(ctx context.Context) error {
 
 	values := map[string]interface{}{
 		"createNamespace": false,
-		"namespace":       c.namespace,
-		"secretName":      c.secretName,
+		"namespace":       c.config.ControlPlaneNamespace,
+		"secretName":      c.config.SecretName,
 		"useHostBinary":   useHostBinary,
 		"verbose":         logpkg.GetFlag(c.logger.Logger.Level), // set logging in the controller to the same as our level
 		"image": map[string]interface{}{
@@ -67,7 +67,7 @@ func (c *Cluster) LoadHelmCharts(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("failed to load chart files: %w", err)
 	}
-	rel, err := installOrUpgradeEmbeddedChart(chartFiles, c.namespace, c.apiConfig.Config, values)
+	rel, err := installOrUpgradeEmbeddedChart(chartFiles, c.config.ControlPlaneNamespace, c.apiConfig.Config, values)
 	if err != nil {
 		return fmt.Errorf("failed to install/upgrade helm chart: %w", err)
 	}

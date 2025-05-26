@@ -20,16 +20,16 @@ func (c *Cluster) Execute(ctx context.Context) (newKubeconfig []byte, err error)
 		return nil, fmt.Errorf("failed to create Oxide API client: %v", err)
 	}
 
-	projectID, err := ensureProjectExists(ctx, c.logger, client, c.projectID)
+	projectID, err := ensureProjectExists(ctx, c.logger, client, c.config.ClusterProject)
 	if err != nil {
 		return nil, fmt.Errorf("project verification failed: %v", err)
 	}
-	if projectID != "" && projectID != c.projectID {
+	if projectID != "" && projectID != c.config.ClusterProject {
 		c.projectID = projectID
 		c.logger.Infof("Using project ID: %s", c.projectID)
 	}
 
-	images, err := ensureImagesExist(ctx, c.logger, client, c.projectID, c.imageParallelism, c.controlPlaneSpec.Image, c.workerSpec.Image)
+	images, err := ensureImagesExist(ctx, c.logger, client, c.projectID, c.config.ImageParallelism, c.config.ControlPlaneSpec.Image, c.config.WorkerSpec.Image)
 	if err != nil {
 		return nil, fmt.Errorf("image verification failed: %v", err)
 	}
@@ -39,23 +39,23 @@ func (c *Cluster) Execute(ctx context.Context) (newKubeconfig []byte, err error)
 	c.logger.Infof("images %v", images)
 
 	// control plane image and root disk size
-	c.controlPlaneSpec.Image = images[0]
-	minSize := util.RoundUp(c.controlPlaneSpec.Image.Size, GB)
-	if c.controlPlaneSpec.RootDiskSize == 0 {
-		c.controlPlaneSpec.RootDiskSize = minSize
+	c.config.ControlPlaneSpec.Image = images[0]
+	minSize := util.RoundUp(c.config.ControlPlaneSpec.Image.Size, GB)
+	if c.config.ControlPlaneSpec.RootDiskSize == 0 {
+		c.config.ControlPlaneSpec.RootDiskSize = minSize
 	}
-	if c.controlPlaneSpec.RootDiskSize < minSize {
-		return nil, fmt.Errorf("control plane root disk size %d is less than minimum image size %d", c.controlPlaneSpec.RootDiskSize, minSize)
+	if c.config.ControlPlaneSpec.RootDiskSize < minSize {
+		return nil, fmt.Errorf("control plane root disk size %d is less than minimum image size %d", c.config.ControlPlaneSpec.RootDiskSize, minSize)
 	}
 
 	// worker image and root disk size
-	c.workerSpec.Image = images[1]
-	minSize = util.RoundUp(c.workerSpec.Image.Size, GB)
-	if c.workerSpec.RootDiskSize == 0 {
-		c.workerSpec.RootDiskSize = minSize
+	c.config.WorkerSpec.Image = images[1]
+	minSize = util.RoundUp(c.config.WorkerSpec.Image.Size, GB)
+	if c.config.WorkerSpec.RootDiskSize == 0 {
+		c.config.WorkerSpec.RootDiskSize = minSize
 	}
-	if c.workerSpec.RootDiskSize < minSize {
-		return nil, fmt.Errorf("worker root disk size %d is less than minimum image size %d", c.workerSpec.RootDiskSize, minSize)
+	if c.config.WorkerSpec.RootDiskSize < minSize {
+		return nil, fmt.Errorf("worker root disk size %d is less than minimum image size %d", c.config.WorkerSpec.RootDiskSize, minSize)
 	}
 
 	newKubeconfig, err = c.ensureClusterExists(ctx)

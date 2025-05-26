@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/aifoundry-org/oxide-controller/pkg/config"
 	"github.com/aifoundry-org/oxide-controller/pkg/util"
 	"k8s.io/client-go/kubernetes"
 	"tailscale.com/client/tailscale/v2"
@@ -18,51 +19,36 @@ import (
 )
 
 type Cluster struct {
-	logger              *log.Entry
-	oxideConfig         *oxide.Config
-	projectID           string
-	controlPlanePrefix  string
-	workerPrefix        string
-	controlPlaneCount   int
-	clusterInitWait     time.Duration
+	// logger
+	logger *log.Entry
+
+	// reusable config that should be loaded into the secret and shared, whether running locally or in-cluster
+	config *config.ControllerConfig
+
+	// config that is derived locally
 	kubeconfigOverwrite bool
-	// workerCount per the CLI flags; once cluster is up and running, relies solely on amount stored in secret
-	workerCount                  int
-	controlPlaneSpec, workerSpec NodeSpec
-	secretName                   string
-	namespace                    string
-	userPubkey                   []byte
-	controlPlaneIP               string
-	imageParallelism             int
-	tailscaleAPIKey              string
-	tailscaleTailnet             string
-	clientset                    *kubernetes.Clientset
-	apiConfig                    *Config
-	ociImage                     string
+	ociImage            string // OCI image to use for the controller
+	oxideConfig         *oxide.Config
+	clientset           *kubernetes.Clientset
+	apiConfig           *Config
+	projectID           string        // ID of the Oxide project
+	initWait            time.Duration // time to wait for the cluster to initialize
 }
 
 // New creates a new Cluster instance
-func New(logger *log.Entry, oxideConfig *oxide.Config, projectID string, controlPlanePrefix, workerPrefix string, controlPlaneCount, workerCount int, controlPlaneSpec, workerSpec NodeSpec, imageParallelism int, namespace, secretName string, pubkey []byte, clusterInitWait time.Duration, kubeconfigOverwrite bool, tailscaleAPIKey, tailscaleTailnet, OCIimage string) *Cluster {
+func New(logger *log.Entry, ctrlrConfig *config.ControllerConfig, kubeconfigOverwrite bool, ociImage string, initWait time.Duration) *Cluster {
+	//oxideConfig *oxide.Config, projectID string, controlPlanePrefix, workerPrefix string, controlPlaneCount, workerCount int, controlPlaneSpec, workerSpec NodeSpec, imageParallelism int, namespace, secretName string, pubkey []byte, clusterInitWait time.Duration, kubeconfigOverwrite bool, tailscaleAPIKey, tailscaleTailnet, OCIimage string)
 	c := &Cluster{
-		logger:              logger.WithField("component", "cluster"),
-		oxideConfig:         oxideConfig,
-		projectID:           projectID,
-		controlPlanePrefix:  controlPlanePrefix,
-		workerPrefix:        workerPrefix,
-		controlPlaneSpec:    controlPlaneSpec,
-		workerSpec:          workerSpec,
-		secretName:          secretName,
-		namespace:           namespace,
-		userPubkey:          pubkey,
-		clusterInitWait:     clusterInitWait,
+		logger: logger.WithField("component", "cluster"),
+		config: ctrlrConfig,
+		oxideConfig: &oxide.Config{
+			Token: ctrlrConfig.OxideToken,
+			Host:  ctrlrConfig.OxideURL,
+		},
 		kubeconfigOverwrite: kubeconfigOverwrite,
-		imageParallelism:    imageParallelism,
-		tailscaleAPIKey:     tailscaleAPIKey,
-		tailscaleTailnet:    tailscaleTailnet,
-		ociImage:            OCIimage,
+		ociImage:            ociImage,
+		initWait:            initWait,
 	}
-	c.workerCount = workerCount
-	c.controlPlaneCount = controlPlaneCount
 	return c
 }
 
@@ -74,9 +60,9 @@ func (c *Cluster) ensureClusterExists(ctx context.Context) (newKubeconfig []byte
 		return nil, fmt.Errorf("failed to create Oxide API client: %v", err)
 	}
 	projectID := c.projectID
-	controlPlanePrefix := c.controlPlanePrefix
-	controlPlaneCount := c.controlPlaneCount
-	secretName := c.secretName
+	controlPlanePrefix := c.config.ControlPlaneSpec.Prefix
+	controlPlaneCount := c.config.ControlPlaneCount
+	secretName := c.config.SecretName
 
 	c.logger.Debugf("Checking if control plane IP %s exists", controlPlanePrefix)
 	controlPlaneIP, err := c.ensureControlPlaneIP(ctx, controlPlanePrefix)
@@ -84,8 +70,8 @@ func (c *Cluster) ensureClusterExists(ctx context.Context) (newKubeconfig []byte
 		return nil, fmt.Errorf("failed to get control plane IP: %w", err)
 	}
 
-	if c.controlPlaneIP == "" {
-		c.controlPlaneIP = controlPlaneIP.Ip
+	if c.config.ControlPlaneIP == "" {
+		c.config.ControlPlaneIP = controlPlaneIP.Ip
 	}
 
 	c.logger.Debugf("Checking if %d control plane nodes exist with prefix %s", controlPlaneCount, controlPlanePrefix)
@@ -146,8 +132,8 @@ func (c *Cluster) ensureClusterExists(ctx context.Context) (newKubeconfig []byte
 			return nil, fmt.Errorf("failed to generate SSH key pair: %w", err)
 		}
 		var pubkeyList []string
-		if c.userPubkey != nil {
-			pubkeyList = append(pubkeyList, string(c.userPubkey))
+		if c.config.UserSSHPublicKey != "" {
+			pubkeyList = append(pubkeyList, c.config.UserSSHPublicKey)
 		}
 		pubkeyList = append(pubkeyList, string(pub))
 		// add the public key to the node in addition to the user one
@@ -166,7 +152,7 @@ func (c *Cluster) ensureClusterExists(ctx context.Context) (newKubeconfig []byte
 			externalIP  string
 			fipAttached bool
 		)
-		if c.controlPlaneSpec.ExternalIP {
+		if c.config.ControlPlaneSpec.ExternalIP {
 			c.logger.Debugf("Control plane node %s has external IP, using that", hostid)
 			ipList, err := client.InstanceExternalIpList(ctx, oxide.InstanceExternalIpListParams{
 				Instance: oxide.NameOrId(hostid),
@@ -215,18 +201,18 @@ func (c *Cluster) ensureClusterExists(ctx context.Context) (newKubeconfig []byte
 		clusterAccessIP := externalIP
 
 		// wait for the control plane node to be up and running
-		timeLeft := c.clusterInitWait
+		timeLeft := c.initWait
 		for {
 			c.logger.Infof("Waiting %s for control plane node to be up and running...", timeLeft)
 			sleepTime := 30 * time.Second
 			time.Sleep(sleepTime)
 			timeLeft -= sleepTime
 
-			if c.tailscaleAPIKey != "" {
+			if c.config.TailscaleAPIKey != "" {
 				c.logger.Infof("Checking if control plane node has joined tailnet")
 				client := &tailscale.Client{
-					Tailnet: c.tailscaleTailnet,
-					APIKey:  c.tailscaleAPIKey,
+					Tailnet: c.config.TailscaleTailnet,
+					APIKey:  c.config.TailscaleAPIKey,
 				}
 				ctx := context.Background()
 				devices, err := client.Devices().List(ctx)
@@ -286,16 +272,9 @@ func (c *Cluster) ensureClusterExists(ctx context.Context) (newKubeconfig []byte
 			return nil, fmt.Errorf("failed to run command to retrieve join token on control plane node: %w", err)
 		}
 		// save the private key and public key to the secret
-		secrets[secretKeySystemSSHPublic] = pub
-		secrets[secretKeySystemSSHPrivate] = priv
-		secrets[secretKeyJoinToken] = joinToken
-		secrets[secretKeyOxideToken] = []byte(c.oxideConfig.Token)
-		secrets[secretKeyOxideURL] = []byte(c.oxideConfig.Host)
-
-		// save the user ssh public key to the secrets map
-		if c.userPubkey != nil {
-			secrets[secretKeyUserSSH] = c.userPubkey
-		}
+		c.config.K3sJoinToken = string(joinToken)
+		c.config.SystemSSHPublicKey = string(pub)
+		c.config.SystemSSHPrivateKey = string(priv)
 
 		// get the kubeconfig
 		kubeconfig, err := util.RunSSHCommand("root", fmt.Sprintf("%s:22", clusterAccessIP), priv, "cat /etc/rancher/k3s/k3s.yaml")
@@ -310,10 +289,6 @@ func (c *Cluster) ensureClusterExists(ctx context.Context) (newKubeconfig []byte
 		re := regexp.MustCompile(`(server:\s*\w+://)(\d+\.\d+\.\d+\.\d+)(:\d+)`)
 		kubeconfigString = re.ReplaceAllString(kubeconfigString, fmt.Sprintf("${1}%s${3}", clusterAccessIP))
 
-		// if we have worker node count explicitly defined, save it
-		if c.workerCount > 0 {
-			secrets[secretKeyWorkerCount] = []byte(fmt.Sprintf("%d", c.workerCount))
-		}
 		newKubeconfig = []byte(kubeconfigString)
 
 		// get a Kubernetes client
@@ -329,12 +304,18 @@ func (c *Cluster) ensureClusterExists(ctx context.Context) (newKubeconfig []byte
 		c.clientset = clientset
 
 		// ensure we have the namespace we need
-		namespace := c.namespace
+		namespace := c.config.ControlPlaneNamespace
 		if err := createNamespace(ctx, clientset, namespace); err != nil {
 			return nil, fmt.Errorf("failed to create namespace: %w", err)
 		}
 
-		// save the join token, system ssh key pair, user ssh key to the Kubernetes secret
+		configJson, err := c.config.ToJSON()
+		if err != nil {
+			return nil, fmt.Errorf("failed to convert config to JSON: %w", err)
+		}
+		secrets[secretKeyConfig] = configJson
+
+		// save the config to the Kubernetes secret
 		c.logger.Debugf("Saving secret %s/%s to Kubernetes", namespace, secretName)
 		if err := saveSecret(ctx, clientset, c.logger, namespace, secretName, secrets); err != nil {
 			return nil, fmt.Errorf("failed to save secret: %w", err)
