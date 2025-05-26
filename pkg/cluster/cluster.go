@@ -203,6 +203,11 @@ func (c *Cluster) ensureClusterExists(ctx context.Context) (newKubeconfig []byte
 		// wait for the control plane node to be up and running
 		timeLeft := c.initWait
 		for {
+			if timeLeft <= 0 {
+				c.logger.Errorf("Control plane at %s did not respond in time, exiting", clusterAccessIP)
+				return nil, fmt.Errorf("control plane at %s did not respond in time", clusterAccessIP)
+			}
+
 			c.logger.Infof("Waiting %s for control plane node to be up and running...", timeLeft)
 			sleepTime := 30 * time.Second
 			time.Sleep(sleepTime)
@@ -246,10 +251,6 @@ func (c *Cluster) ensureClusterExists(ctx context.Context) (newKubeconfig []byte
 			if isClusterAlive(fmt.Sprintf("https://%s:%d", clusterAccessIP, 6443)) {
 				c.logger.Infof("Control plane at %s is up and running", clusterAccessIP)
 				break
-			}
-			if timeLeft <= 0 {
-				c.logger.Errorf("Control plane at %s did not respond in time, exiting", clusterAccessIP)
-				return nil, fmt.Errorf("control plane at %s did not respond in time", clusterAccessIP)
 			}
 		}
 		// attach the floating IP to the control plane node, if not done already
