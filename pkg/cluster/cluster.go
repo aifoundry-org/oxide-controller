@@ -94,6 +94,10 @@ func (c *Cluster) ensureClusterExists(ctx context.Context) (newKubeconfig []byte
 
 	// if we have enough nodes, return
 	if len(controlPlaneNodes) >= int(controlPlaneCount) {
+		c.logger.Debugf("Found %d control plane nodes, asked for %d, no need to do more", len(controlPlaneNodes), controlPlaneCount)
+		if err := c.setClusterCreds(nil); err != nil {
+			return nil, fmt.Errorf("failed to set cluster credentials: %w", err)
+		}
 		return nil, nil
 	}
 
@@ -293,20 +297,13 @@ func (c *Cluster) ensureClusterExists(ctx context.Context) (newKubeconfig []byte
 		newKubeconfig = []byte(kubeconfigString)
 
 		// get a Kubernetes client
-		apiConfig, err := GetRestConfig(newKubeconfig)
-		if err != nil || apiConfig == nil {
-			return nil, fmt.Errorf("failed to get rest config: %w", err)
+		if err := c.setClusterCreds(newKubeconfig); err != nil {
+			return nil, fmt.Errorf("failed to set cluster credentials: %w", err)
 		}
-		c.apiConfig = apiConfig
-		clientset, err := getClientset(c.apiConfig.Config)
-		if err != nil {
-			return nil, fmt.Errorf("unable to get Kubernetes clientset: %w", err)
-		}
-		c.clientset = clientset
 
 		// ensure we have the namespace we need
 		namespace := c.config.ControlPlaneNamespace
-		if err := createNamespace(ctx, clientset, namespace); err != nil {
+		if err := createNamespace(ctx, c.clientset, namespace); err != nil {
 			return nil, fmt.Errorf("failed to create namespace: %w", err)
 		}
 
@@ -318,11 +315,15 @@ func (c *Cluster) ensureClusterExists(ctx context.Context) (newKubeconfig []byte
 
 		// save the config to the Kubernetes secret
 		c.logger.Debugf("Saving secret %s/%s to Kubernetes", namespace, secretName)
-		if err := saveSecret(ctx, clientset, c.logger, namespace, secretName, secrets); err != nil {
+		if err := saveSecret(ctx, c.clientset, c.logger, namespace, secretName, secrets); err != nil {
 			return nil, fmt.Errorf("failed to save secret: %w", err)
 		}
 
 		controlPlaneNodes = append(controlPlaneNodes, instances[0])
+	} else {
+		if err := c.setClusterCreds(nil); err != nil {
+			return nil, fmt.Errorf("failed to set cluster credentials: %w", err)
+		}
 	}
 
 	// the number we want is the next one
@@ -346,4 +347,18 @@ func isCanonicalIPv4(s string) bool {
 	ipv4 := ip.To4()
 	// Ensure it's truly an IPv4 (not IPv6-mapped) and in canonical form
 	return ipv4 != nil && ipv4.String() == s
+}
+
+func (c *Cluster) setClusterCreds(kubeconfig []byte) error {
+	apiConfig, err := GetRestConfig(kubeconfig)
+	if err != nil || apiConfig == nil {
+		return fmt.Errorf("failed to get rest config: %w", err)
+	}
+	c.apiConfig = apiConfig
+	clientset, err := getClientset(c.apiConfig.Config)
+	if err != nil {
+		return fmt.Errorf("unable to get Kubernetes clientset: %w", err)
+	}
+	c.clientset = clientset
+	return nil
 }

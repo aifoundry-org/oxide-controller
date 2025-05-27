@@ -16,7 +16,7 @@ import (
 
 // GetJoinToken retrieves a new k3s worker join token from the Kubernetes cluster
 func (c *Cluster) GetJoinToken(ctx context.Context) (string, error) {
-	conf, err := getSecretConfig(ctx, c.apiConfig.Config, c.logger, c.config.ControlPlaneNamespace, c.config.SecretName)
+	conf, err := GetSecretConfig(ctx, c.apiConfig.Config, c.logger, c.config.ControlPlaneNamespace, c.config.SecretName)
 	if err != nil {
 		return "", err
 	}
@@ -25,7 +25,7 @@ func (c *Cluster) GetJoinToken(ctx context.Context) (string, error) {
 
 // GetUserSSHPublicKey retrieves the SSH public key from the Kubernetes cluster
 func (c *Cluster) GetUserSSHPublicKey(ctx context.Context) ([]byte, error) {
-	conf, err := getSecretConfig(ctx, c.apiConfig.Config, c.logger, c.config.ControlPlaneNamespace, c.config.SecretName)
+	conf, err := GetSecretConfig(ctx, c.apiConfig.Config, c.logger, c.config.ControlPlaneNamespace, c.config.SecretName)
 	if err != nil {
 		return nil, err
 	}
@@ -34,17 +34,25 @@ func (c *Cluster) GetUserSSHPublicKey(ctx context.Context) ([]byte, error) {
 
 // GetOxideToken retrieves the oxide token from the Kubernetes cluster
 func (c *Cluster) GetOxideToken(ctx context.Context) ([]byte, error) {
-	return GetOxideToken(ctx, c.apiConfig.Config, c.logger, c.config.ControlPlaneNamespace, c.config.SecretName)
+	conf, err := GetSecretConfig(ctx, c.apiConfig.Config, c.logger, c.config.ControlPlaneNamespace, c.config.SecretName)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get secret: %w", err)
+	}
+	return []byte(conf.OxideToken), nil
 }
 
 // GetOxideURL retrieves the oxide URL from the Kubernetes cluster
 func (c *Cluster) GetOxideURL(ctx context.Context) ([]byte, error) {
-	return GetOxideURL(ctx, c.apiConfig.Config, c.logger, c.config.ControlPlaneNamespace, c.config.SecretName)
+	conf, err := GetSecretConfig(ctx, c.apiConfig.Config, c.logger, c.config.ControlPlaneNamespace, c.config.SecretName)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get secret: %w", err)
+	}
+	return []byte(conf.OxideURL), nil
 }
 
 // GetWorkerCount retrieves the targeted worker count from the Kubernetes cluster
 func (c *Cluster) GetWorkerCount(ctx context.Context) (int, error) {
-	conf, err := getSecretConfig(ctx, c.apiConfig.Config, c.logger, c.config.ControlPlaneNamespace, c.config.SecretName)
+	conf, err := GetSecretConfig(ctx, c.apiConfig.Config, c.logger, c.config.ControlPlaneNamespace, c.config.SecretName)
 	if err != nil {
 		return 0, err
 	}
@@ -53,30 +61,12 @@ func (c *Cluster) GetWorkerCount(ctx context.Context) (int, error) {
 
 // SetWorkerCount sets the targeted worker count in the Kubernetes cluster
 func (c *Cluster) SetWorkerCount(ctx context.Context, count int) error {
-	conf, err := getSecretConfig(ctx, c.apiConfig.Config, c.logger, c.config.ControlPlaneNamespace, c.config.SecretName)
+	conf, err := GetSecretConfig(ctx, c.apiConfig.Config, c.logger, c.config.ControlPlaneNamespace, c.config.SecretName)
 	if err != nil {
 		return fmt.Errorf("failed to get secret: %w", err)
 	}
 	conf.WorkerCount = uint(count)
 	return setSecretConfig(ctx, c.apiConfig.Config, c.logger, c.config.ControlPlaneNamespace, c.config.SecretName, conf)
-}
-
-// GetOxideToken retrieves the oxide token from the Kubernetes cluster
-func GetOxideToken(ctx context.Context, restConfig *rest.Config, logger *log.Entry, namespace, secretName string) ([]byte, error) {
-	conf, err := getSecretConfig(ctx, restConfig, logger, namespace, secretName)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get secret: %w", err)
-	}
-	return []byte(conf.OxideToken), nil
-}
-
-// GetOxideURL retrieves the oxide URL from the Kubernetes cluster
-func GetOxideURL(ctx context.Context, restConfig *rest.Config, logger *log.Entry, namespace, secretName string) ([]byte, error) {
-	conf, err := getSecretConfig(ctx, restConfig, logger, namespace, secretName)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get secret: %w", err)
-	}
-	return []byte(conf.OxideURL), nil
 }
 
 // getSecret gets the secret with all of our important information
@@ -166,7 +156,7 @@ func setSecretValue(ctx context.Context, apiConfig *rest.Config, logger *log.Ent
 }
 
 // func getSecretValue(ctx context.Context, apiConfig *rest.Config, logger *log.Entry, namespace, secret, key string) ([]byte, error) {
-func getSecretConfig(ctx context.Context, apiConfig *rest.Config, logger *log.Entry, namespace, secret string) (*config.ControllerConfig, error) {
+func GetSecretConfig(ctx context.Context, apiConfig *rest.Config, logger *log.Entry, namespace, secret string) (*config.ControllerConfig, error) {
 	logger.Debugf("Getting controller config from secret '%s'", secret)
 	data, err := getSecretValue(ctx, apiConfig, logger, namespace, secret, secretKeyConfig)
 	if err != nil {
