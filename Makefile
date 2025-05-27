@@ -18,6 +18,11 @@ TARGET ?= /usr/local/bin/$(CONTROLLER_NAME)
 
 IMAGE_NAME ?= aifoundryorg/oxide-controller
 
+PLATFORMS ?= linux/amd64 linux/arm64 linux/riscv64 darwin/amd64 darwin/arm64
+CONTROLLERS := $(foreach plat,$(PLATFORMS),$(CONTROLLER_GENERIC)-$(subst /,-,$(plat)))
+
+build-all: $(CONTROLLERS)
+
 build: $(CONTROLLER)
 
 install: build
@@ -26,8 +31,8 @@ install: build
 $(BINDIR):
 	@mkdir -p $@
 
-$(CONTROLLER): $(BINDIR)
-	@go build -o $@ ./cmd/
+$(CONTROLLER_GENERIC)-%: $(BINDIR)
+	@GOOS=$(word 1,$(subst -, ,$*)) GOARCH=$(word 2,$(subst -, ,$*)) go build -o $@ ./cmd/
 
 link: $(CONTROLLER) $(CONTROLLER_GENERIC)
 

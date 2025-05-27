@@ -6,7 +6,35 @@ on:
       - 'v*'
 
 jobs:
-  build-and-push:
+  build-binaries:
+    name: Build Binaries    
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: 'go.mod'
+      - name: Build
+        run: |
+            make build-all
+
+      - name: Create SHA256 checksum for files
+        run: |
+          for file in bin/*; do
+            sha256sum "$file" | awk '{ print $1 }' > "${file}.sha256"
+          done
+      - name: Create GitHub Release
+        id: create_release
+        uses: softprops/action-gh-release@v2
+        with:
+          draft: false
+          prerelease: true
+          files: |
+            bin/*
+
+  build-and-push-image:
     name: Build and Push Docker Image
     runs-on: ubuntu-latest
     
